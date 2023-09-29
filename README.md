@@ -133,7 +133,7 @@ Download the Replica RGB-D scan dataset using the downloading [script](https://g
 ```bash
 export REPLICA_ROOT=/path/to/Replica
 
-export CG_FOLDER=/rvl-home/guqiao/test/conceptgraph/
+export CG_FOLDER=/path/to/concept-graphs/
 export REPLICA_CONFIG_PATH=${CG_FOLDER}/conceptgraph/dataset/dataconfigs/replica/replica.yaml
 ```
 

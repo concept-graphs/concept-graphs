@@ -257,15 +257,18 @@ python scripts/animate_mapping_save.py --input_folder $REPLICA_ROOT/$SCENE_NAME/
 
 ### Visualize the object-based mapping results
 
+```bash
+python scripts/visualize_cfslam_results.py --result_path /path/to/output.pkl.gz
+```
+
+Then in the open3d visualizer window, you can use the following key callbacks to change the visualization. 
 * Press `b` to toggle the background point clouds (wall, floor, ceiling, etc.). Only works on the ConceptGraphs-Detect.
 * Press `c` to color the point clouds by the object class from the tagging model. Only works on the ConceptGraphs-Detect.
 * Press `r` to color the point clouds by RGB. 
 * Press `f` and type text in the terminal, and the point cloud will be colored by the CLIP similarity with the input text. 
 * Press `i` to color the point clouds by object instance ID. 
 
-```bash
-python scripts/visualize_cfslam_results.py --result_path /path/to/output.pkl.gz
-```
+
 
 ### Extract object captions and build scene graphs
 

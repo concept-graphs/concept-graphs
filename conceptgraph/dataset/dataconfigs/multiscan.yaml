@@ -1,0 +1,9 @@
+dataset_name: 'multiscan'
+camera_params:
+  image_height: 1440   # This and the following fields to be completed by sequence-specific metadata
+  image_width: 1920
+  fx: 0
+  fy: 0
+  cx: 0
+  cy: 0
+  png_depth_scale: 1000.0 # Yes multiscan also uses milimteter for depth png

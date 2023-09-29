@@ -1,0 +1,9 @@
+camera_params:
+  cx: 979.7905883789062
+  cy: 553.7803955078125
+  fx: 1366.19677734375
+  fy: 1365.9189453125
+  image_height: 1080
+  image_width: 1920
+  png_depth_scale: 1000.0
+dataset_name: realsense

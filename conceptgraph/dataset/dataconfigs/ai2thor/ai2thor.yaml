@@ -1,0 +1,9 @@
+dataset_name: 'ai2thor'
+camera_params:
+  image_height: 480
+  image_width: 640
+  fx: 240.0
+  fy: 240.0
+  cx: 320.0
+  cy: 240.0
+  png_depth_scale: 1000.0 #for depth image in png format

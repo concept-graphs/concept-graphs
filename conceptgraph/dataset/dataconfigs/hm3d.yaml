@@ -1,0 +1,9 @@
+dataset_name: 'hm3d'
+camera_params:
+  image_height: 512
+  image_width: 512
+  fx: 256.0
+  fy: 256.0
+  cx: 256.0
+  cy: 256.0
+  png_depth_scale: 1.0 # The depth is in npy format, and this value should not be used

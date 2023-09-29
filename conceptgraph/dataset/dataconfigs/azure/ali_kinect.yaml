@@ -1,0 +1,10 @@
+dataset_name: 'azure'
+camera_params:
+  image_height: 720
+  image_width: 1280
+  fx: 613.7001953125
+  fy: 613.67138671875
+  cx: 637.96630859375
+  cy: 366.78909301757812
+  png_depth_scale: 1000.0
+  crop_edge: 0

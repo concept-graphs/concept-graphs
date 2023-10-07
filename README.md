@@ -61,7 +61,7 @@ pip install .
 cd ..
 git clone https://github.com/gradslam/gradslam.git
 cd gradslam
-git checkout conceptgraph
+git checkout conceptfusion
 pip install .
 ```
 

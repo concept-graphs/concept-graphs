@@ -143,6 +143,10 @@ ConceptGraphs can also be easily run on other dataset. See `dataset/datasets_com
 
 The following commands should be run in the `conceptgraph` folder.
 
+```bash
+cd conceptgraph
+```
+
 ### (Optional) Run regular 3D reconstruction for sanity check
 
 The following command runs a 3D RGB reconstruction ([GradSLAM](https://github.com/gradslam/gradslam)) of a replica scene and also visualize it. This is useful for sanity check. 

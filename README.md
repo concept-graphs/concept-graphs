@@ -72,7 +72,7 @@ Follow the instructions on the original [repo](https://github.com/IDEA-Research/
 First checkout the package by 
 
 ```bash
-git clone git@github.com:IDEA-Research/Grounded-Segment-Anything.git
+git clone https://github.com/IDEA-Research/Grounded-Segment-Anything.git
 ```
 
 Then, install the package Following the commands listed in the original GitHub repo. You can skip the `Install osx` step and the "optional dependencies". 

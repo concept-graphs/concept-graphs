@@ -324,3 +324,72 @@ python scripts/visualize_cfslam_results.py \
     --result_path ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache/map/scene_map_cfslam_pruned.pkl.gz \
     --edge_file ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache/cfslam_object_relations.json
 ```
+
+
+## AI2Thor-related experiments
+
+During the development stage, we performed some experiments on the AI2Thor dataset. 
+Upon request, now we provide the code and instructions for these experiments. 
+However, note that we didn't perform any quantitative evaluation on AI2Thor. 
+And because of domain gap, performance of ConceptGraphs may be worse than other datasets reported. 
+
+### Setup 
+
+Use our own [fork](https://github.com/georgegu1997/ai2thor), where some changes were made to record the interaction trajectories. 
+
+```bash
+cd .. # go back to the root folder CFSLAM
+git clone git@github.com:georgegu1997/ai2thor.git
+cd ai2thor
+git checkout main5.0.0
+pip install -e .
+
+# This is for the ProcThor dataset.
+pip install ai2thor-colab prior --upgrade
+```
+
+If you meet error saying `Could not load the Qt platform plugin "xcb"` later on, it probably means that is some weird issue with `opencv-python` and `opencv-python-headless`. Try uninstalling them and install one of them back. 
+
+### Generating AI2Thor datasets
+
+1. Use `$AI2THOR_DATASET_ROOT` as the directory ai2thor dataset and save it to a variable. Also set the scene used from AI2Thor. 
+
+```bash
+# Change this to run it in a different scene in AI2Thor environment
+# train_3 is a scene from the ProcThor dataset, which containing multiple rooms in one house
+SCENE_NAME=train_3
+
+# The following scripts need to be run in the conceptgraph folder
+cd ./conceptgraph
+```
+
+2. Generate a densely captured grid map for the selected scene. 
+```bash
+# Uniform sample camera locations (XY + Yaw)
+python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --sample_method uniform --n_sample -1 --grid_size 0.5
+# Uniform sample + randomize lighting
+python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --sample_method uniform --n_sample -1 --grid_size 0.5 --save_suffix randlight --randomize_lighting
+```
+
+3. Generate a human-controlled trajectory for the selected scene. (GUI and keyboard interaction needed)
+```bash
+# Interact generation and save trajectory files. 
+# This line will open up a Unity window. You can control the agent with arrow keys in the terminal window. 
+python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --interact
+
+# Generate observations from the saved trajectory file
+python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --sample_method from_file
+```
+
+4. Generate a trajectory with object randomly moved. 
+```bash
+MOVE_RATIO=0.25
+RAND_SUFFIX=mv${MOVE_RATIO}
+python scripts/generate_ai2thor_dataset.py \
+    --dataset_root $AI2THOR_DATASET_ROOT \
+    --scene_name $SCENE_NAME \
+    --interact \
+    --save_suffix $RAND_SUFFIX \
+    --randomize_move_moveable_ratio $MOVE_RATIO \
+    --randomize_move_pickupable_ratio $MOVE_RATIO
+```

@@ -272,6 +272,28 @@ Then in the open3d visualizer window, you can use the following key callbacks to
 * Press `f` and type text in the terminal, and the point cloud will be colored by the CLIP similarity with the input text. 
 * Press `i` to color the point clouds by object instance ID. 
 
+### Evaluate semantic segmentation from the object-based mapping results on Replica datasets
+
+First, download the GT point cloud with per-point semantic segmentation labels from this [Google Drive link](https://drive.google.com/file/d/1NhQIM5PCH5L5vkZDSRq6YF1bRaSX2aem/view?usp=sharing). Please refer to [this issue](https://github.com/concept-graphs/concept-graphs/issues/18#issuecomment-1876673985) for a brief description of how they are generated. Unzip the file and record its location in `REPLICA_SEMANTIC_ROOT`. 
+
+Then run the following command to evaluate the semantic segmentation results. The results will be saved in the `results` folder, where the mean recall `mrecall` is the mAcc and `fmiou` is the F-mIoU reported in the paper. 
+
+```bash
+# CoceptGraphs (without open-vocab detector)
+python scripts/eval_replica_semseg.py \
+    --replica_root $REPLICA_ROOT \
+    --replica_semantic_root $REPLICA_SEMANTIC_ROOT \
+    --n_exclude 6 \
+    --pred_exp_name none_overlap_maskconf0.95_simsum1.2_dbscan.1_merge20_masksub
+
+# On the ConceptGraphs-Detect (Grounding-DINO as the object detector)
+python scripts/eval_replica_semseg.py \
+    --replica_root $REPLICA_ROOT \
+    --replica_semantic_root $REPLICA_SEMANTIC_ROOT \
+    --n_exclude 6 \
+    --pred_exp_name ram_withbg_allclasses_overlap_maskconf0.25_simsum1.2_dbscan.1_masksub
+```
+
 
 
 ### Extract object captions and build scene graphs

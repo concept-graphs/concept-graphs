@@ -48,7 +48,7 @@ conda install -c pytorch faiss-cpu=1.7.4 mkl=2021 blas=1.0=mkl
 
 ##### Install Pytorch according to your own setup #####
 # For example, if you have a GPU with CUDA 11.8 (We tested it Pytorch 2.0.1)
-pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu118
+conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=11.8 -c pytorch -c nvidia
 
 # Install Pytorch3D (https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md)
 # conda install pytorch3d -c pytorch3d # This detects a conflict. You can use the command below, maybe with a different version

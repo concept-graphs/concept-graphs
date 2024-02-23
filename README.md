@@ -41,6 +41,8 @@ conda create -n conceptgraph anaconda python=3.10
 conda activate conceptgraph
 
 # Install the required libraries
+pip install tyro open_clip_torch wandb h5py openai hydra-core distinctipy
+
 # for yolo
 pip install ultralytics
 

@@ -20,6 +20,7 @@ import pickle
 import gzip
 import open_clip
 
+from ultralytics import YOLO
 import torch
 import torchvision
 from torch.utils.data import Dataset
@@ -109,6 +110,9 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument("--class_set", type=str, default="scene", 
                         choices=["scene", "generic", "minimal", "tag2text", "ram", "none"], 
                         help="If none, no tagging and detection will be used and the SAM will be run in dense sampling mode. ")
+    parser.add_argument("--detector", type=str, default="yolo", 
+                        choices=["yolo", "dino"], 
+                        help="When given classes, whether to use YOLO-World or GroundingDINO to detect objects. ")
     parser.add_argument("--add_bg_classes", action="store_true", 
                         help="If set, add background classes (wall, floor, ceiling) to the class set. ")
     parser.add_argument("--accumu_classes", action="store_true",
@@ -388,6 +392,9 @@ def main(args: argparse.Namespace):
 
     global_classes = set()
     
+    # Initialize a YOLO-World model
+    yolo_model_w_classes = YOLO('yolov8l-world.pt')  # or choose yolov8m/l-world.pt
+    
     if args.class_set == "scene":
         # Load the object meta information
         obj_meta_path = args.dataset_root / args.scene_id / "obj_meta.json"
@@ -548,33 +555,53 @@ def main(args: argparse.Namespace):
             
             cv2.imwrite(vis_save_path, annotated_image)
         else:
-            # Using GroundingDINO to detect and SAM to segment
-            detections = grounding_dino_model.predict_with_classes(
-                image=image, # This function expects a BGR image...
-                classes=classes,
-                box_threshold=args.box_threshold,
-                text_threshold=args.text_threshold,
-            )
+            if args.detector == "dino":
+                # Using GroundingDINO to detect and SAM to segment
+                detections = grounding_dino_model.predict_with_classes(
+                    image=image, # This function expects a BGR image...
+                    classes=classes,
+                    box_threshold=args.box_threshold,
+                    text_threshold=args.text_threshold,
+                )
             
-            if len(detections.class_id) > 0:
-                ### Non-maximum suppression ###
-                # print(f"Before NMS: {len(detections.xyxy)} boxes")
-                nms_idx = torchvision.ops.nms(
-                    torch.from_numpy(detections.xyxy), 
-                    torch.from_numpy(detections.confidence), 
-                    args.nms_threshold
-                ).numpy().tolist()
-                # print(f"After NMS: {len(detections.xyxy)} boxes")
+                if len(detections.class_id) > 0:
+                    ### Non-maximum suppression ###
+                    # print(f"Before NMS: {len(detections.xyxy)} boxes")
+                    nms_idx = torchvision.ops.nms(
+                        torch.from_numpy(detections.xyxy), 
+                        torch.from_numpy(detections.confidence), 
+                        args.nms_threshold
+                    ).numpy().tolist()
+                    # print(f"After NMS: {len(detections.xyxy)} boxes")
 
-                detections.xyxy = detections.xyxy[nms_idx]
-                detections.confidence = detections.confidence[nms_idx]
-                detections.class_id = detections.class_id[nms_idx]
+                    detections.xyxy = detections.xyxy[nms_idx]
+                    detections.confidence = detections.confidence[nms_idx]
+                    detections.class_id = detections.class_id[nms_idx]
+                    
+                    # Somehow some detections will have class_id=-1, remove them
+                    valid_idx = detections.class_id != -1
+                    detections.xyxy = detections.xyxy[valid_idx]
+                    detections.confidence = detections.confidence[valid_idx]
+                    detections.class_id = detections.class_id[valid_idx]
+            elif args.detector == "yolo":
+                # YOLO 
+                # yolo_model.set_classes(classes)
+                yolo_model_w_classes.set_classes(classes)
+                yolo_results_w_classes = yolo_model_w_classes.predict(color_path)
+
+                yolo_results_w_classes[0].save(vis_save_path[:-4] + "_yolo_out.jpg")
+                xyxy_tensor = yolo_results_w_classes[0].boxes.xyxy 
+                xyxy_np = xyxy_tensor.cpu().numpy()
+                confidences = yolo_results_w_classes[0].boxes.conf.cpu().numpy()
                 
-                # Somehow some detections will have class_id=-1, remove them
-                valid_idx = detections.class_id != -1
-                detections.xyxy = detections.xyxy[valid_idx]
-                detections.confidence = detections.confidence[valid_idx]
-                detections.class_id = detections.class_id[valid_idx]
+                detections = sv.Detections(
+                    xyxy=xyxy_np,
+                    confidence=confidences,
+                    class_id=yolo_results_w_classes[0].boxes.cls.cpu().numpy().astype(int),
+                    mask=None,
+                )
+                
+            if len(detections.class_id) > 0:
                 
                 ### Segment Anything ###
                 detections.mask = get_sam_segmentation_from_xyxy(

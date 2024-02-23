@@ -427,12 +427,15 @@ def filter_gobs(
                 continue
             
         # Skip masks with low confidence
-        if gobs['confidence'][mask_idx] < cfg.mask_conf_threshold:
-            continue
+        if gobs['confidence'] is not None:
+            if gobs['confidence'][mask_idx] < cfg.mask_conf_threshold:
+                continue
         
         idx_to_keep.append(mask_idx)
     
     for k in gobs.keys():
+        if k == 'confidence':
+            continue
         if isinstance(gobs[k], str) or k == "classes": # Captions
             continue
         elif isinstance(gobs[k], list):

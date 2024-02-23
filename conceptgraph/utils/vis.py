@@ -211,10 +211,20 @@ def vis_result_fast(
     mask_annotator = sv.MaskAnnotator(
         color = color
     )
-    labels = [
-        f"{classes[class_id]} {confidence:0.2f}" 
-        for _, _, confidence, class_id, _ 
-        in detections]
+
+    if hasattr(detections, 'confidence') and hasattr(detections, 'class_id'):
+        confidences = detections.confidence
+        class_ids = detections.class_id
+        if confidences is not None:
+            labels = [
+                f"{classes[class_id]} {confidence:0.2f}"
+                for confidence, class_id in zip(confidences, class_ids)
+            ]
+        else:
+            labels = [f"{classes[class_id]}" for class_id in class_ids]
+    else:
+        print("Detections object does not have 'confidence' or 'class_id' attributes or one of them is missing.")
+
     
     if instance_random_color:
         # generate random colors for each segmentation

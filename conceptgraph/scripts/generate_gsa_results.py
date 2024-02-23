@@ -47,6 +47,7 @@ else:
     raise ValueError("Please set the GSA_PATH environment variable to the path of the GSA repo. ")
     
 import sys
+TAG2TEXT_PATH = os.path.join(GSA_PATH, "")
 EFFICIENTSAM_PATH = os.path.join(GSA_PATH, "EfficientSAM")
 sys.path.append(GSA_PATH) # This is needed for the following imports in this file
 sys.path.append(TAG2TEXT_PATH) # This is needed for some imports in the Tag2Text files

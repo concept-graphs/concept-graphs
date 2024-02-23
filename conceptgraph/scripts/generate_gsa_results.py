@@ -46,17 +46,18 @@ else:
     raise ValueError("Please set the GSA_PATH environment variable to the path of the GSA repo. ")
     
 import sys
-TAG2TEXT_PATH = os.path.join(GSA_PATH, "Tag2Text")
 EFFICIENTSAM_PATH = os.path.join(GSA_PATH, "EfficientSAM")
 sys.path.append(GSA_PATH) # This is needed for the following imports in this file
 sys.path.append(TAG2TEXT_PATH) # This is needed for some imports in the Tag2Text files
 sys.path.append(EFFICIENTSAM_PATH)
+
+import torchvision.transforms as TS
 try:
-    from Tag2Text.models import tag2text
-    from Tag2Text import inference_tag2text, inference_ram
-    import torchvision.transforms as TS
+    from ram.models import ram
+    from ram.models import tag2text
+    from ram import inference_tag2text, inference_ram
 except ImportError as e:
-    print("Tag2text sub-package not found. Please check your GSA_PATH. ")
+    print("RAM sub-package not found. Please check your GSA_PATH. ")
     raise e
 
 # Disable torch gradient computation
@@ -422,7 +423,7 @@ def main(args: argparse.Namespace):
             # we reduce the threshold to obtain more tags
             tagging_model.threshold = 0.64 
         elif args.class_set == "ram":
-            tagging_model = tag2text.ram(pretrained=RAM_CHECKPOINT_PATH,
+            tagging_model = ram(pretrained=RAM_CHECKPOINT_PATH,
                                          image_size=384,
                                          vit='swin_l')
             
@@ -487,7 +488,7 @@ def main(args: argparse.Namespace):
             raw_image = tagging_transform(raw_image).unsqueeze(0).to(args.device)
             
             if args.class_set == "ram":
-                res = inference_ram.inference(raw_image , tagging_model)
+                res = inference_ram(raw_image , tagging_model)
                 caption="NA"
             elif args.class_set == "tag2text":
                 res = inference_tag2text.inference(raw_image , tagging_model, specified_tags)

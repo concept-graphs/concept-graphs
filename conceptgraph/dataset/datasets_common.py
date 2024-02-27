@@ -28,7 +28,7 @@ from gradslam.geometry.geometryutils import relative_transformation
 from gradslam.slam.pointfusion import PointFusion
 from gradslam.structures.rgbdimages import RGBDImages
 
-from conceptgraph.utils.general_utils import to_scalar
+from conceptgraph.utils.general_utils import to_scalar, measure_time
 
 
 def as_intrinsics_matrix(intrinsics):
@@ -1086,7 +1086,7 @@ def common_dataset_to_batch(dataset):
         embeddings = embeddings.float()
     return colors, depths, intrinsics, poses, embeddings
 
-
+@measure_time
 def get_dataset(dataconfig, basedir, sequence, **kwargs):
     config_dict = load_dataset_config(dataconfig)
     if config_dict["dataset_name"].lower() in ["icl"]:

@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Literal, Union
 from textwrap import wrap
+from conceptgraph.utils.general_utils import prjson
 
 import cv2
 import matplotlib.pyplot as plt
@@ -108,23 +109,6 @@ def load_scene_map(args, scene_map):
         print(f"Loaded {len(scene_map)} objects")
 
 
-def prjson(input_json, indent=0):
-    """ Pretty print a json object """
-    if not isinstance(input_json, list):
-        input_json = [input_json]
-        
-    print("[")
-    for i, entry in enumerate(input_json):
-        print("  {")
-        for j, (key, value) in enumerate(entry.items()):
-            terminator = "," if j < len(entry) - 1 else ""
-            if isinstance(value, str):
-                formatted_value = value.replace("\\n", "\n").replace("\\t", "\t")
-                print('    "{}": "{}"{}'.format(key, formatted_value, terminator))
-            else:
-                print(f'    "{key}": {value}{terminator}')
-        print("  }" + ("," if i < len(input_json) - 1 else ""))
-    print("]")
 
 def crop_image_pil(image: Image, x1: int, y1: int, x2: int, y2: int, padding: int = 0) -> Image:
     """

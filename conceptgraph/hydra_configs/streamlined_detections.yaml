@@ -1,0 +1,9 @@
+defaults:
+  - base
+  - replica
+  - sam
+  - _self_
+
+stride: 1
+exp_suffix: _streamlined_yolo_stride50_no_bg24
+save_video: true

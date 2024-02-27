@@ -1,0 +1,4 @@
+sam_variant: sam # sam
+sam_encoder_version: "vit_h"
+sam_checkpoint_path: /home/kuwajerw/repos/new_segment_anything/Grounded-Segment-Anything/sam_vit_h_4b8939.pth
+mobile_sam_path: /home/kuwajerw/repos/new_segment_anything/Grounded-Segment-Anything/mobile_sam.pt

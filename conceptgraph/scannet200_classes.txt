@@ -1,0 +1,200 @@
+alarm clock
+armchair
+backpack
+bag
+ball
+bar
+basket
+bathroom cabinet
+bathroom counter
+bathroom stall
+bathroom stall door
+bathroom vanity
+bathtub
+bed
+bench
+bicycle
+bin
+blackboard
+blanket
+blinds
+board
+book
+bookshelf
+bottle
+bowl
+box
+broom
+bucket
+bulletin board
+cabinet
+calendar
+candle
+cart
+case of water bottles
+cd case
+ceiling
+ceiling light
+chair
+clock
+closet
+closet door
+closet rod
+closet wall
+clothes
+clothes dryer
+coat rack
+coffee kettle
+coffee maker
+coffee table
+column
+computer tower
+container
+copier
+couch
+counter
+crate
+cup
+curtain
+cushion
+decoration
+desk
+dining table
+dish rack
+dishwasher
+divider
+door
+doorframe
+dresser
+dumbbell
+dustpan
+end table
+fan
+file cabinet
+fire alarm
+fire extinguisher
+fireplace
+floor
+folded chair
+furniture
+guitar
+guitar case
+hair dryer
+handicap bar
+hat
+headphones
+ironing board
+jacket
+keyboard
+keyboard piano
+kitchen cabinet
+kitchen counter
+ladder
+lamp
+laptop
+laundry basket
+laundry detergent
+laundry hamper
+ledge
+light
+light switch
+luggage
+machine
+mailbox
+mat
+mattress
+microwave
+mini fridge
+mirror
+monitor
+mouse
+music stand
+nightstand
+object
+office chair
+ottoman
+oven
+paper
+paper bag
+paper cutter
+paper towel dispenser
+paper towel roll
+person
+piano
+picture
+pillar
+pillow
+pipe
+plant
+plate
+plunger
+poster
+potted plant
+power outlet
+power strip
+printer
+projector
+projector screen
+purse
+rack
+radiator
+rail
+range hood
+recycling bin
+refrigerator
+scale
+seat
+shelf
+shoe
+shower
+shower curtain
+shower curtain rod
+shower door
+shower floor
+shower head
+shower wall
+sign
+sink
+soap dish
+soap dispenser
+sofa chair
+speaker
+stair rail
+stairs
+stand
+stool
+storage bin
+storage container
+storage organizer
+stove
+structure
+stuffed animal
+suitcase
+table
+telephone
+tissue box
+toaster
+toaster oven
+toilet
+toilet paper
+toilet paper dispenser
+toilet paper holder
+toilet seat cover dispenser
+towel
+trash bin
+trash can
+tray
+tube
+tv
+tv stand
+vacuum cleaner
+vent
+wall
+wardrobe
+washing machine
+water bottle
+water cooler
+water pitcher
+whiteboard
+window
+windowsill

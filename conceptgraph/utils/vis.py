@@ -2,6 +2,7 @@ import copy
 from typing import Iterable
 import dataclasses
 from PIL import Image
+import cv2
 
 import numpy as np
 import matplotlib
@@ -372,6 +373,33 @@ def normalized(a, axis=-1, order=2):
     l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
     l2[l2 == 0] = 1
     return a / np.expand_dims(l2, axis), l2
+
+def save_video_detections(exp_out_path, save_path=None, fps=30):
+    '''
+    Save the detections in the folder as a video
+    '''
+    if save_path is None:
+        save_path = exp_out_path / "vis_video.mp4"
+    
+    # Get the list of images
+    image_files = list((exp_out_path / "vis").glob("*.jpg"))
+    image_files.sort()
+    
+    # Read the first image to get the size
+    image = Image.open(image_files[0])
+    width, height = image.size
+    
+    # Create the video writer
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(str(save_path), fourcc, fps, (width, height))
+    
+    # Write the images to the video
+    for image_file in image_files:
+        image = cv2.imread(str(image_file))
+        out.write(image)
+    
+    out.release()
+    print(f"Video saved at {save_path}")
 
 
 class LineMesh(object):

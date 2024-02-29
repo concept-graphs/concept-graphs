@@ -1,0 +1,9 @@
+defaults:
+  - base_mapping
+  - replica
+  - sam
+  - _self_
+
+stride: 50
+exp_suffix: streamlined_yolo_stride40_no_bg31
+save_video: false

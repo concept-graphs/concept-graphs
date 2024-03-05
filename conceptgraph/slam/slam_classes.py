@@ -70,13 +70,14 @@ class DetectionList(list):
             classes.append(most_common_class)
         return classes
     
-    def color_by_most_common_classes(self, colors_dict: dict[str, list[float]], color_bbox: bool=True):
+    def color_by_most_common_classes(self, obj_classes, color_bbox: bool=True):
         '''
         Color the point cloud of each detection by the most common class
         '''
         classes = self.get_most_common_class()
         for d, c in zip(self, classes):
-            color = colors_dict[str(c)]
+            # color = obj_classes[str(c)]
+            color = obj_classes.get_class_color(int(c))
             d['pcd'].paint_uniform_color(color)
             if color_bbox:
                 d['bbox'].color = color

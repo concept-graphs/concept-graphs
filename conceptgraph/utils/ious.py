@@ -149,7 +149,7 @@ def compute_giou_batch(bbox1: torch.Tensor, bbox2: torch.Tensor) -> torch.Tensor
 
     return giou
 
-def compute_3d_iou_accuracte_batch(bbox1, bbox2):
+def compute_3d_iou_accurate_batch(bbox1, bbox2):
     '''
     Compute IoU between two sets of oriented (or axis-aligned) 3D bounding boxes.
     

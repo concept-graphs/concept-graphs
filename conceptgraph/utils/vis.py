@@ -401,6 +401,41 @@ def save_video_detections(exp_out_path, save_path=None, fps=30):
     out.release()
     print(f"Video saved at {save_path}")
 
+def save_video_from_frames(frames, save_path, fps=30):
+    """
+    Save a video from an array of frames.
+
+    Args:
+    - frames: An array of frames, each frame being an image array.
+    - save_path: Path where the video should be saved.
+    - fps: Frames per second for the output video.
+    """
+    # Ensure frames are in uint8
+    frames = np.asarray(frames).astype(np.uint8)
+    
+    # Check if frames array is empty
+    if frames.size == 0:
+        print("No frames to save.")
+        return
+    
+    # Get the size of the first frame
+    height, width = frames[0].shape[:2]
+    
+    # Create the video writer
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(str(save_path), fourcc, fps, (width, height))
+    
+    # Write the frames to the video
+    for frame in frames:
+        # OpenCV expects BGR format, might need to convert from RGB to BGR
+        if frame.shape[2] == 3:  # If frame has three channels
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        out.write(frame)
+    
+    # Release the video writer
+    out.release()
+    print(f"Video saved at {save_path}")
+
 
 class LineMesh(object):
     def __init__(self, points, lines=None, colors=[0, 1, 0], radius=0.15):

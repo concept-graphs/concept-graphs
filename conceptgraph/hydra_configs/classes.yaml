@@ -1,0 +1,3 @@
+classes_file: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/conceptgraph/scannet200_classes.txt
+bg_classes : ["wall", "floor", "ceiling"]
+skip_bg: !!bool False

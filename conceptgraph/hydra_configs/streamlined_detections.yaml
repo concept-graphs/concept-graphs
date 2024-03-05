@@ -1,9 +1,10 @@
 defaults:
-  - base
+  - base_detections
   - replica
   - sam
+  - classes
   - _self_
 
-stride: 1
-exp_suffix: _streamlined_yolo_stride50_no_bg24
-save_video: true
+stride: 50
+exp_suffix: s_detections_stride50_yes_bg_38
+save_video: false

@@ -1,3 +1,4 @@
 dataset_root: /home/kuwajerw/new_local_data/new_replica/Replica
 dataset_config: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/conceptgraph/dataset/dataconfigs/replica/replica.yaml
 scene_id: room0
+render_camera_path: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/conceptgraph/dataset/dataconfigs/replica/replica_room0.json

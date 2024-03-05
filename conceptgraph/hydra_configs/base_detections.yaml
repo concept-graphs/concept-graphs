@@ -10,7 +10,6 @@ box_threshold: 0.2
 text_threshold: 0.2
 nms_threshold: 0.5
 class_set: null
-classes_file: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/conceptgraph/scannet200_classes.txt
 add_bg_classes: false
 accumu_classes: false
 sam_variant: sam

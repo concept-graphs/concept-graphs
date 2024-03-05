@@ -2,8 +2,11 @@ defaults:
   - base_mapping
   - replica
   - sam
+  - classes
   - _self_
 
+detections_exp_suffix: s_detections_stride50_yes_bg_38
 stride: 50
-exp_suffix: streamlined_yolo_stride40_no_bg31
-save_video: false
+exp_suffix: s_mapping_yes_bg_39
+save_video: !!bool True
+save_objects_all_frames: !!bool True

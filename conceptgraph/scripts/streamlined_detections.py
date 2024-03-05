@@ -19,7 +19,7 @@ from segment_anything import sam_model_registry, SamPredictor, SamAutomaticMaskG
 
 from conceptgraph.dataset.datasets_common import get_dataset
 from conceptgraph.utils.vis import vis_result_fast, vis_result_slow_caption, save_video_detections
-from conceptgraph.utils.general_utils import measure_time, save_hydra_config, cfg_to_dict, prjson
+from conceptgraph.utils.general_utils import get_det_out_path, get_exp_out_path, get_vis_out_path, measure_time, save_hydra_config, cfg_to_dict, prjson, ObjectClasses
 from conceptgraph.utils.model_utils import compute_clip_features_batched, compute_ft_vector_closeness_statistics, get_sam_predictor,  get_sam_segmentation_from_xyxy_batched, get_sam_segmentation_from_xyxy, compute_clip_features
 
 
@@ -52,17 +52,17 @@ def main(cfg: DictConfig):
     clip_tokenizer = open_clip.get_tokenizer("ViT-H-14")
     
     # Set the classes for the detection model
-    bg_classes = ["wall", "floor", "ceiling"]
-    classes = [line.strip() for line in open(cfg.classes_file)]
-    classes = [cls for cls in classes if cls not in bg_classes] # remove background classes
-    detection_model.set_classes(classes)
+    
+    # classes = [line.strip() for line in open(cfg.classes_file)]
+    # classes = [cls for cls in classes if cls not in bg_classes] # remove background classes
+    obj_classes = ObjectClasses(cfg.classes_file, bg_classes=cfg.bg_classes, skip_bg=cfg.skip_bg)
+    detection_model.set_classes(obj_classes.get_classes_arr())
     
     # Create the output directory and save the current config
-    exp_out_path = Path(cfg.dataset_root) / cfg.scene_id / f"exp_{cfg.exp_suffix}"
-    vis_folder_path = exp_out_path / "vis"
-    detections_folder_path = exp_out_path / "detections"
-    vis_folder_path.mkdir(exist_ok=True, parents=True)
-    detections_folder_path.mkdir(exist_ok=True, parents=True)
+    exp_out_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.exp_suffix)
+    # exp_out_path = Path(cfg.dataset_root) / cfg.scene_id / "exps" / f"exp_{cfg.exp_suffix}"
+    vis_folder_path = get_vis_out_path(exp_out_path)
+    detections_folder_path = get_det_out_path(exp_out_path)
 
     save_hydra_config(cfg, exp_out_path)
     
@@ -109,10 +109,10 @@ def main(cfg: DictConfig):
 
         # Compute and save the clip features of detections  
         image_crops, image_feats, text_feats = compute_clip_features_batched(
-            image_rgb, detections, clip_model, clip_preprocess, clip_tokenizer, classes, cfg.device)
+            image_rgb, detections, clip_model, clip_preprocess, clip_tokenizer, obj_classes.get_classes_arr(), cfg.device)
 
         #Visualize and save the annotated image
-        annotated_image, labels = vis_result_fast(image, detections, classes)
+        annotated_image, labels = vis_result_fast(image, detections, obj_classes.get_classes_arr())
         cv2.imwrite(vis_save_path, annotated_image)
         
         # Save results 
@@ -122,7 +122,7 @@ def main(cfg: DictConfig):
             "confidence": detections.confidence,
             "class_id": detections.class_id,
             "mask": detections.mask,
-            "classes": classes,
+            "classes": obj_classes.get_classes_arr(),
             "image_crops": image_crops,
             "image_feats": image_feats,
             "text_feats": text_feats,

@@ -434,8 +434,6 @@ def filter_gobs(
         idx_to_keep.append(mask_idx)
     
     for k in gobs.keys():
-        if k == 'confidence':
-            continue
         if isinstance(gobs[k], str) or k == "classes": # Captions
             continue
         elif isinstance(gobs[k], list):

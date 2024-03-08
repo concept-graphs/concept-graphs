@@ -112,7 +112,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument("--class_set", type=str, default="scene", 
                         choices=["scene", "generic", "minimal", "tag2text", "ram", "none"], 
                         help="If none, no tagging and detection will be used and the SAM will be run in dense sampling mode. ")
-    parser.add_argument("--detector", type=str, default="yolo", 
+    parser.add_argument("--detector", type=str, default="dino", 
                         choices=["yolo", "dino"], 
                         help="When given classes, whether to use YOLO-World or GroundingDINO to detect objects. ")
     parser.add_argument("--add_bg_classes", action="store_true", 

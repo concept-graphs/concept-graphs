@@ -531,6 +531,12 @@ def main(args: argparse.Namespace):
                     detections.xyxy = detections.xyxy[valid_idx]
                     detections.confidence = detections.confidence[valid_idx]
                     detections.class_id = detections.class_id[valid_idx]
+
+                    # # Somehow some detections will have class_id=-None, remove them
+                    # valid_idx = [i for i, val in enumerate(detections.class_id) if val is not None]
+                    # detections.xyxy = detections.xyxy[valid_idx]
+                    # detections.confidence = detections.confidence[valid_idx]
+                    # detections.class_id = [detections.class_id[i] for i in valid_idx]
             elif args.detector == "yolo":
                 # YOLO 
                 # yolo_model.set_classes(classes)

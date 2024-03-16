@@ -2,7 +2,6 @@
 import gzip
 from pathlib import Path
 import pickle
-from conceptgraph.scripts.generate_gsa_results import get_sam_predictor
 import cv2
 import hydra
 from line_profiler import profile
@@ -15,12 +14,11 @@ from ultralytics import SAM
 import supervision as sv
 import open_clip
 
-from segment_anything import sam_model_registry, SamPredictor, SamAutomaticMaskGenerator
 
 from conceptgraph.dataset.datasets_common import get_dataset
-from conceptgraph.utils.vis import vis_result_fast, vis_result_slow_caption, save_video_detections
-from conceptgraph.utils.general_utils import get_det_out_path, get_exp_out_path, get_vis_out_path, measure_time, save_hydra_config, cfg_to_dict, prjson, ObjectClasses
-from conceptgraph.utils.model_utils import compute_clip_features_batched, compute_ft_vector_closeness_statistics, get_sam_predictor,  get_sam_segmentation_from_xyxy_batched, get_sam_segmentation_from_xyxy, compute_clip_features
+from conceptgraph.utils.vis import vis_result_fast, save_video_detections
+from conceptgraph.utils.general_utils import get_det_out_path, get_exp_out_path, get_vis_out_path, measure_time, save_hydra_config, ObjectClasses
+from conceptgraph.utils.model_utils import compute_clip_features_batched 
 
 
 @hydra.main(version_base=None, config_path="../hydra_configs/", config_name="streamlined_detections")

@@ -1,49 +1,49 @@
 import os
 from conceptgraph.utils.general_utils import measure_time
 from line_profiler import profile
-from segment_anything import sam_model_registry, SamPredictor, SamAutomaticMaskGenerator
+# from segment_anything import sam_model_registry, SamPredictor, SamAutomaticMaskGenerator
 import numpy as np
 import torch
 from PIL import Image
 from scipy.spatial.distance import cosine
 
-def get_sam_predictor(cfg) -> SamPredictor:
-    if cfg.sam_variant == "sam":
-        sam = sam_model_registry[cfg.sam_encoder_version](checkpoint=cfg.sam_checkpoint_path)
-        sam.to(cfg.device)
-        sam_predictor = SamPredictor(sam)
-        return sam_predictor
+# def get_sam_predictor(cfg) -> SamPredictor:
+#     if cfg.sam_variant == "sam":
+#         sam = sam_model_registry[cfg.sam_encoder_version](checkpoint=cfg.sam_checkpoint_path)
+#         sam.to(cfg.device)
+#         sam_predictor = SamPredictor(sam)
+#         return sam_predictor
     
-    if cfg.sam_variant == "mobilesam":
-        from MobileSAM.setup_mobile_sam import setup_model
-        # MOBILE_SAM_CHECKPOINT_PATH = os.path.join(GSA_PATH, "./EfficientSAM/mobile_sam.pt")
-        # checkpoint = torch.load(MOBILE_SAM_CHECKPOINT_PATH)
-        checkpoint = torch.load(cfg.mobile_sam_path)
-        mobile_sam = setup_model()
-        mobile_sam.load_state_dict(checkpoint, strict=True)
-        mobile_sam.to(device=cfg.device)
+#     if cfg.sam_variant == "mobilesam":
+#         from MobileSAM.setup_mobile_sam import setup_model
+#         # MOBILE_SAM_CHECKPOINT_PATH = os.path.join(GSA_PATH, "./EfficientSAM/mobile_sam.pt")
+#         # checkpoint = torch.load(MOBILE_SAM_CHECKPOINT_PATH)
+#         checkpoint = torch.load(cfg.mobile_sam_path)
+#         mobile_sam = setup_model()
+#         mobile_sam.load_state_dict(checkpoint, strict=True)
+#         mobile_sam.to(device=cfg.device)
         
-        sam_predictor = SamPredictor(mobile_sam)
-        return sam_predictor
+#         sam_predictor = SamPredictor(mobile_sam)
+#         return sam_predictor
 
-    elif cfg.sam_variant == "lighthqsam":
-        from LightHQSAM.setup_light_hqsam import setup_model
-        HQSAM_CHECKPOINT_PATH = os.path.join(GSA_PATH, "./EfficientSAM/sam_hq_vit_tiny.pth")
-        checkpoint = torch.load(HQSAM_CHECKPOINT_PATH)
-        light_hqsam = setup_model()
-        light_hqsam.load_state_dict(checkpoint, strict=True)
-        light_hqsam.to(device=cfg.device)
+#     elif cfg.sam_variant == "lighthqsam":
+#         from LightHQSAM.setup_light_hqsam import setup_model
+#         HQSAM_CHECKPOINT_PATH = os.path.join(GSA_PATH, "./EfficientSAM/sam_hq_vit_tiny.pth")
+#         checkpoint = torch.load(HQSAM_CHECKPOINT_PATH)
+#         light_hqsam = setup_model()
+#         light_hqsam.load_state_dict(checkpoint, strict=True)
+#         light_hqsam.to(device=cfg.device)
         
-        sam_predictor = SamPredictor(light_hqsam)
-        return sam_predictor
+#         sam_predictor = SamPredictor(light_hqsam)
+#         return sam_predictor
         
-    elif cfg.sam_variant == "fastsam":
-        raise NotImplementedError
-    else:
-        raise NotImplementedError
+#     elif cfg.sam_variant == "fastsam":
+#         raise NotImplementedError
+#     else:
+#         raise NotImplementedError
 
 # Prompting SAM with detected boxes in a batch
-def get_sam_segmentation_from_xyxy_batched(sam_predictor: SamPredictor, image: np.ndarray, xyxy_tensor: torch.Tensor) -> torch.Tensor:
+def get_sam_segmentation_from_xyxy_batched(sam_predictor, image: np.ndarray, xyxy_tensor: torch.Tensor) -> torch.Tensor:
     
     sam_predictor.set_image(image)
     
@@ -59,7 +59,7 @@ def get_sam_segmentation_from_xyxy_batched(sam_predictor: SamPredictor, image: n
     return masks.squeeze()
 
 # Prompting SAM with detected boxes in a batch
-def get_sam_segmentation_from_xyxy(sam_predictor: SamPredictor, image: np.ndarray, xyxy: np.ndarray) -> np.ndarray:
+def get_sam_segmentation_from_xyxy(sam_predictor, image: np.ndarray, xyxy: np.ndarray) -> np.ndarray:
     
     sam_predictor.set_image(image)
     

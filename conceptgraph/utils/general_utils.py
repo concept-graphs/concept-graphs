@@ -117,7 +117,7 @@ def cfg_to_dict(input_cfg):
     return serializable_cfg
 
 def get_exp_out_path(dataset_root, scene_id, exp_suffix):
-    exp_out_path = Path(dataset_root) / scene_id / "exps" / f"exp_{exp_suffix}"
+    exp_out_path = Path(dataset_root) / scene_id / "exps" / f"{exp_suffix}"
     exp_out_path.mkdir(exist_ok=True, parents=True)
     return exp_out_path
 
@@ -238,3 +238,9 @@ class ObjectClasses:
         else:
             raise ValueError("Key must be an integer index or a string class name.")
         return self.class_to_color.get(class_name, [0, 0, 0])  # Default color for undefined classes
+
+    def get_class_color_dict_by_index(self):
+        """
+        Returns a dictionary of class colors, just like self.class_to_color, but indexed by class index.
+        """
+        return {str(i): self.get_class_color(i) for i in range(len(self.classes))}

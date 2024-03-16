@@ -60,27 +60,19 @@ def get_parser():
 def load_result(result_path):
     with gzip.open(result_path, "rb") as f:
         results = pickle.load(f)
+
+    if not isinstance(results, dict):
+        raise ValueError("Results should be a dictionary! other types are not supported!")
     
-    if isinstance(results, dict):
-        objects = MapObjectList()
-        objects.load_serializable(results["objects"])
-        
-        if results['bg_objects'] is None:
-            bg_objects = None
-        else:
-            bg_objects = MapObjectList()
-            bg_objects.load_serializable(results["bg_objects"])
-
-        class_colors = results['class_colors']
-    elif isinstance(results, list):
-        objects = MapObjectList()
-        objects.load_serializable(results)
-
+    objects = MapObjectList()
+    objects.load_serializable(results["objects"])
+    bg_objects = MapObjectList()
+    bg_objects.extend(obj for obj in objects if obj['is_background'])
+    if len(bg_objects) == 0:
         bg_objects = None
-        class_colors = distinctipy.get_colors(len(objects), pastel_factor=0.5)
-        class_colors = {str(i): c for i, c in enumerate(class_colors)}
-    else:
-        raise ValueError("Unknown results type: ", type(results))
+    class_colors = results['class_colors']
+        
+    
         
     return objects, bg_objects, class_colors
 
@@ -151,8 +143,12 @@ def main(args):
     cmap = matplotlib.colormaps.get_cmap("turbo")
     
     if bg_objects is not None:
-        indices_bg = np.arange(len(objects), len(objects) + len(bg_objects))
-        objects.extend(bg_objects)
+        indices_bg = []
+        for obj_idx, obj in enumerate(objects):
+            if obj['is_background']:
+                indices_bg.append(obj_idx)
+        # indices_bg = np.arange(len(objects), len(objects) + len(bg_objects))
+        # objects.extend(bg_objects)
         
     # Sub-sample the point cloud for better interactive experience
     for i in range(len(objects)):
@@ -329,3 +325,45 @@ if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
     main(args)
+
+'''
+
+python scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/pcd_saves/full_pcd_none_overlap_maskconf0.95_simsum1.2_dbscan.1_merge20_masksub_post.pkl.gz
+
+python scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/pcd_saves/full_pcd_ram_class_ram_stride50_no_bg__ram_class_ram_stride50_no_bg_overlap_maskconf0.25_simsum1.2_dbscan.1_post.pkl.gz
+
+python scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/pcd_saves/full_pcd_ram__yolo_class_ram_stride50_no_bg4__ram_yolo_class_ram_stride50_no_bg_overlap_maskconf0.25_simsum1.2_dbscan.1_post.pkl.gz
+
+
+python scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/pcd_saves/full_pcd_ram_class_ram_stride50_no_bg__TEST_ram_class_ram_stride50_no_bg_overlap_maskconf0.25_simsum1.2_dbscan.1.pkl.gz
+
+
+python scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/pcd_saves/full_pcd_scannet200_class_ram_stride50_yes_bg2_mapping_scannet200_class_ram_stride50_yes_bg2.pkl.gz
+
+python scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/exps/exp_s_mapping_yes_bg_38/full_pcd_s_mapping_yes_bg_38.pkl.gz
+
+python scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/exps/exp_s_mapping_yes_bg_39/full_pcd_s_mapping_yes_bg_39_post.pkl.gz
+
+
+python concept-graphs/conceptgraph/scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/exps/exp_s_mapping_yes_bg_40/full_pcd_s_mapping_yes_bg_40_post.pkl.gz
+
+python concept-graphs/conceptgraph/scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/exps/exp_s_mapping_yes_bg_41/full_pcd_s_mapping_yes_bg_41_post.pkl.gz
+
+python concept-graphs/conceptgraph/scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/exps/exp_s_mapping_yes_bg_42/full_pcd_s_mapping_yes_bg_42_post.pkl.gz
+
+python concept-graphs/conceptgraph/scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/exps/exp_s_mapping_yes_bg_43/full_pcd_s_mapping_yes_bg_43_post.pkl.gz
+
+python concept-graphs/conceptgraph/scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/office0/exps/s_mapping_yes_bg_multirun_45/full_pcd_s_mapping_yes_bg_multirun_45.pkl.gz
+
+
+python concept-graphs/conceptgraph/scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/room0/exps/s_mapping_yes_bg_multirun_45/full_pcd_s_mapping_yes_bg_multirun_45.pkl.gz
+
+python concept-graphs/conceptgraph/scripts/visualize_cfslam_results.py --result_path /home/kuwajerw/new_local_data/new_replica/Replica/office0/exps/s_mapping_yes_bg_multirun_45/full_pcd_s_mapping_yes_bg_multirun_45.pkl.gz
+
+
+
+python concept-graphs/conceptgraph/scripts/streamlined_detections.py
+
+kernprof -l concept-graphs/conceptgraph/slam/streamlined_mapping.py
+'''
+

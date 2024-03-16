@@ -41,6 +41,7 @@ max_bbox_area_ratio: 0.5 # boxes with larger areas than this will be skipped
 min_points_threshold: 16 # projected and sampled pcd with less points will be skipped
 
 # point cloud processing
+obj_pcd_max_points: 5000 # Determines the maximum point count for object point clouds; exceeding this triggers downsampling to approx max points. Set to -1 to disable.
 downsample_voxel_size: 0.025
 dbscan_remove_noise: !!bool True
 dbscan_eps: 0.1
@@ -57,9 +58,13 @@ merge_text_sim_thresh: 0.7     # Merge only if the text cosine sim is larger
 
 # Periodically perform post-process operations every k frame
 # -1 means not perform them during the run. They are performed at the end anyway. 
+
 denoise_interval: 20           # Run DBSCAN every k frame. This operation is heavy
 filter_interval: -1            # Filter objects that have too few associations or are too small
 merge_interval: -1             # Merge objects based on geometric and semantic similarity
+run_denoise_final_frame: !!bool True
+run_filter_final_frame: !!bool True
+run_merge_final_frame: !!bool True
 
 # Output point cloud
 save_pcd: !!bool True

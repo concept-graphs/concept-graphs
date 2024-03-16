@@ -1,0 +1,27 @@
+# python logging configuration for tasks
+# all we are doing is adding more details to the logging pattern
+# everything else is the same
+version: 1
+formatters:
+  simple:
+    # super detailed, outputs full path at the end
+    # format: '[%(asctime)s][%(levelname)s][m:%(module)s][fn:%(funcName)s][ln:%(lineno)d] - %(message)s - in %(pathname)s'
+    # medium detail with just the file name, function name and line number 
+    format: '[%(asctime)s][%(levelname)s][m:%(module)s][fn:%(funcName)s][ln:%(lineno)d] - %(message)s'
+    # default hydra format 
+    # format: '[%(asctime)s][%(name)s][%(levelname)s] - %(message)s'
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: simple
+    stream: ext://sys.stdout
+  file:
+    class: logging.FileHandler
+    formatter: simple
+    # absolute file path
+    filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log
+root:
+  level: INFO
+  handlers: [console, file]
+
+disable_existing_loggers: false

@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Literal, Union
 from textwrap import wrap
+
 from conceptgraph.utils.general_utils import prjson
 
 import cv2
@@ -537,7 +538,8 @@ def extract_object_tag_from_json_str(json_str):
 
 def build_scenegraph(args):
     from conceptgraph.slam.slam_classes import MapObjectList
-    from conceptgraph.slam.utils import compute_overlap_matrix
+    # from conceptgraph.slam.utils import compute_overlap_matrix
+    from conceptgraph.slam.utils import compute_overlap_matrix_general
 
     # Load the scene map
     scene_map = MapObjectList()
@@ -627,7 +629,7 @@ def build_scenegraph(args):
         pkl.dump(scene_map.to_serializable(), f)
 
     print("Computing bounding box overlaps...")
-    bbox_overlaps = compute_overlap_matrix(args, scene_map)
+    bbox_overlaps = compute_overlap_matrix_general(args, scene_map)
 
     # Construct a weighted adjacency matrix based on similarity scores
     weights = []

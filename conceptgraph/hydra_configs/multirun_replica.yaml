@@ -1,0 +1,10 @@
+# defaults:
+#   - streamlined_mapping
+#   - __self__
+
+hydra:
+  # verbose: true
+  mode: MULTIRUN
+  sweeper:
+    params:
+      scene_id: room0, room1, room2, office0, office1, office2, office3, office4

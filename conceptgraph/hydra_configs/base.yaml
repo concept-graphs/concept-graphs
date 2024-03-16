@@ -1,0 +1,2 @@
+defaults:
+  - override hydra/job_logging: custom_logging_format

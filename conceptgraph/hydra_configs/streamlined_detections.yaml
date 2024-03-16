@@ -1,10 +1,13 @@
 defaults:
+  - base
   - base_detections
   - replica
   - sam
   - classes
+  - logging_level
+  - multirun_replica
   - _self_
 
 stride: 50
-exp_suffix: s_detections_stride50_yes_bg_38
+exp_suffix: s_detections_stride50_yes_bg_44_mr
 save_video: false

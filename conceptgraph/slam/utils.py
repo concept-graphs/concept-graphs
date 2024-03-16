@@ -1,11 +1,14 @@
 from collections import Counter
 import copy
 import json
+import logging
 from pathlib import Path
 import cv2
+from line_profiler import profile
 
 import numpy as np
 from omegaconf import DictConfig
+import omegaconf
 import open3d as o3d
 import torch
 
@@ -13,10 +16,10 @@ import torch.nn.functional as F
 
 import faiss
 
-from conceptgraph.utils.general_utils import to_tensor, to_numpy, Timer
+from conceptgraph.utils.general_utils import measure_time, to_tensor, to_numpy, Timer
 from conceptgraph.slam.slam_classes import MapObjectList, DetectionList
 
-from conceptgraph.utils.ious import compute_3d_iou, compute_3d_iou_accurate_batch, mask_subtract_contained, compute_iou_batch
+from conceptgraph.utils.ious import compute_3d_iou, compute_3d_iou_accurate_batch, compute_iou_batch
 from conceptgraph.dataset.datasets_common import from_intrinsics_matrix
 
 def get_classes_colors(classes):
@@ -59,13 +62,15 @@ def create_or_load_colors(cfg, filename="gsa_classes_tag2text"):
         print("Saved class colors to ", class_colors_fp)
     return classes, class_colors
 
+@profile
 def create_object_pcd(depth_array, mask, cam_K, image, obj_color=None) -> o3d.geometry.PointCloud:
     fx, fy, cx, cy = from_intrinsics_matrix(cam_K)
     
     # Also remove points with invalid depth values
     mask = np.logical_and(mask, depth_array > 0)
 
-    if mask.sum() == 0:
+    # if no valid points, return an empty point cloud
+    if not np.any(mask):
         pcd = o3d.geometry.PointCloud()
         return pcd
         
@@ -151,6 +156,7 @@ def pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10) ->
         
     return pcd
 
+@profile
 def process_pcd(pcd, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, run_dbscan=True):
     pcd = pcd.voxel_down_sample(voxel_size=downsample_voxel_size)
     
@@ -163,6 +169,7 @@ def process_pcd(pcd, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbs
         
     return pcd
 
+@profile
 def get_bounding_box(spatial_sim_type, pcd):
     if ("accurate" in spatial_sim_type or "overlap" in spatial_sim_type) and len(pcd.points) >= 4:
         try:
@@ -184,11 +191,13 @@ def merge_obj2_into_obj1(obj1, obj2, downsample_voxel_size, dbscan_remove_noise,
     n_obj2_det = obj2['num_detections']
     
     for k in obj1.keys():
+        if k in ['class_name', 'mask']:
+            continue
         if k in ['caption']:
             # Here we need to merge two dictionaries and adjust the key of the second one
             for k2, v2 in obj2['caption'].items():
                 obj1['caption'][k2 + n_obj1_det] = v2
-        elif k not in ['pcd', 'bbox', 'clip_ft', "text_ft"]:
+        elif k not in ['pcd', 'bbox', 'clip_ft', "text_ft", "class_name"]:
             if isinstance(obj1[k], list) or isinstance(obj1[k], int):
                 obj1[k] += obj2[k]
             elif k == "inst_color":
@@ -266,13 +275,25 @@ def compute_overlap_matrix(objects: MapObjectList, downsample_voxel_size):
     return overlap_matrix
 
 def compute_overlap_matrix_2set(objects_map: MapObjectList, objects_new: DetectionList, downsample_voxel_size) -> np.ndarray:
-    '''
-    compute pairwise overlapping between two set of objects in terms of point nearest neighbor. 
-    objects_map is the existing objects in the map, objects_new is the new objects to be added to the map
-    Suppose len(objects_map) = m, len(objects_new) = n
-    Then we want to construct a matrix of size m x n, where the (i, j) entry is the ratio of points 
-    in point cloud i that are within a distance threshold of any point in point cloud j.
-    '''
+    """
+    Computes pairwise overlap between two sets of objects based on point proximity. 
+    This function evaluates how much each new object overlaps with each existing object in the map by calculating the ratio of points in one object's point cloud that are within a specified distance threshold of points in the other object's point cloud.
+
+    Args:
+        objects_map (MapObjectList): The existing objects in the map, where each object includes a point cloud.
+        objects_new (DetectionList): The new objects to be added to the map, each with its own point cloud.
+        downsample_voxel_size (float): The distance threshold for considering points as overlapping. Points within this distance are counted as overlapping.
+
+    Returns:
+        np.ndarray: An overlap matrix of size m x n, where m is the number of existing objects and n is the number of new objects. Each entry (i, j) in the matrix represents the ratio of points in the i-th existing object's point cloud that are within the distance threshold of any point in the j-th new object's point cloud.
+
+    Note:
+        - The overlap matrix helps identify potential duplicates or matches between new and existing objects based on spatial overlap.
+        - High values (e.g., >0.8) in the matrix suggest a significant overlap, potentially indicating duplicates or very close matches.
+        - Moderate values (e.g., 0.5-0.8) may indicate similar objects with partial overlap.
+        - Low values (<0.5) generally suggest distinct objects with minimal overlap.
+        - The choice of a "match" threshold depends on the application's requirements and may require adjusting based on observed outcomes.
+    """
     m = len(objects_map)
     n = len(objects_new)
     overlap_matrix = np.zeros((m, n))
@@ -322,36 +343,158 @@ def compute_overlap_matrix_2set(objects_map: MapObjectList, objects_new: Detecti
 
     return overlap_matrix
 
-def merge_overlap_objects(merge_overlap_thresh: float, merge_visual_sim_thresh: float, merge_text_sim_thresh: float, objects: MapObjectList, overlap_matrix: np.ndarray, downsample_voxel_size: float, dbscan_remove_noise: bool, dbscan_eps: float, dbscan_min_points: int, spatial_sim_type: str, device: str):
+
+def compute_overlap_matrix_general(objects_a: MapObjectList, objects_b = None, downsample_voxel_size = None) -> np.ndarray:
+    """
+    Compute the overlap matrix between two sets of objects represented by their point clouds. This function can also perform self-comparison when `objects_b` is not provided. The overlap is quantified based on the proximity of points from one object to the nearest points of another, within a threshold specified by `downsample_voxel_size`.
+
+    Parameters
+    ----------
+    objects_a : MapObjectList
+        A list of object representations where each object contains a point cloud ('pcd') and bounding box ('bbox').
+        This is the primary set of objects for comparison.
+
+    objects_b : Optional[MapObjectList]
+        A second list of object representations similar to `objects_a`. If None, `objects_a` will be compared with itself to calculate self-overlap. Defaults to None.
+
+    downsample_voxel_size : Optional[float]
+        The threshold for determining whether points are close enough to be considered overlapping. Specifically, it's the square of the maximum distance allowed between points from two objects to consider those points as overlapping.
+        Must be provided; if None, a ValueError is raised.
+
+    Returns
+    -------
+    np.ndarray
+        A 2D numpy array of shape (len(objects_a), len(objects_b)) containing the overlap ratios between objects.
+        The overlap ratio is defined as the fraction of points in the second object's point cloud that are within `downsample_voxel_size` distance to any point in the first object's point cloud.
+
+    Raises
+    ------
+    ValueError
+        If `downsample_voxel_size` is not provided.
+
+    Notes
+    -----
+    The function uses the FAISS library for efficient nearest neighbor searches to compute the overlap.
+    Additionally, it employs a 3D IoU (Intersection over Union) computation for bounding boxes to quickly filter out pairs of objects without spatial overlap, improving performance.
+    - The overlap matrix helps identify potential duplicates or matches between new and existing objects based on spatial overlap.
+    - High values (e.g., >0.8) in the matrix suggest a significant overlap, potentially indicating duplicates or very close matches.
+    - Moderate values (e.g., 0.5-0.8) may indicate similar objects with partial overlap.
+    - Low values (<0.5) generally suggest distinct objects with minimal overlap.
+    - The choice of a "match" threshold depends on the application's requirements and may require adjusting based on observed outcomes.
+
+    Examples
+    --------
+    >>> objects_a = [{'pcd': pcd1, 'bbox': bbox1}, {'pcd': pcd2, 'bbox': bbox2}]
+    >>> objects_b = [{'pcd': pcd3, 'bbox': bbox3}, {'pcd': pcd4, 'bbox': bbox4}]
+    >>> downsample_voxel_size = 0.05
+    >>> overlap_matrix = compute_overlap_matrix_general(objects_a, objects_b, downsample_voxel_size)
+    >>> print(overlap_matrix)
+    """
+    # if downsample_voxel_size is None, raise an error
+    if downsample_voxel_size is None:
+        raise ValueError("downsample_voxel_size is not provided")
+
+    # are we doing self comparison?
+    same_objects = objects_b is None
+    objects_b = objects_a if same_objects else objects_b
+
+    len_a = len(objects_a)
+    len_b = len(objects_b)
+    overlap_matrix = np.zeros((len_a, len_b))
+
+    # Convert the point clouds into numpy arrays and then into FAISS indices for efficient search
+    points_a = [np.asarray(obj['pcd'].points, dtype=np.float32) for obj in objects_a] # m arrays
+    indices_a = [faiss.IndexFlatL2(points_a_arr.shape[1]) for points_a_arr in points_a] # m indices
+
+    # Add the points from the numpy arrays to the corresponding FAISS indices
+    for idx_a, points_a_arr in zip(indices_a, points_a):
+        idx_a.add(points_a_arr)
+
+    points_b = [np.asarray(obj['pcd'].points, dtype=np.float32) for obj in objects_b] # n arrays
+
+    bbox_a = objects_a.get_stacked_values_torch('bbox')
+    bbox_b = objects_b.get_stacked_values_torch('bbox')
+    ious = compute_3d_iou_accurate_batch(bbox_a, bbox_b) # (m, n)
+
+
+    # Compute the pairwise overlaps
+    for idx_a in range(len_a):
+        for idx_b in range(len_b):
+
+            # skip same object comparison if same_objects is True
+            if same_objects and idx_a == idx_b:
+                continue
+
+            # skip if the boxes do not overlap at all
+            if ious[idx_a,idx_b] < 1e-6:
+                continue
+
+            # get the distance of the nearest neighbor of
+            # each point in points_b[idx_b] to the points_a[idx_a]
+            D, I = indices_a[idx_a].search(points_b[idx_b], 1) 
+            overlap = (D < downsample_voxel_size ** 2).sum() # D is the squared distance
+
+            # Calculate the ratio of points within the threshold
+            overlap_matrix[idx_a, idx_b] = overlap / len(points_b[idx_b])
+
+    return overlap_matrix
+
+
+def merge_overlap_objects(
+    merge_overlap_thresh: float,
+    merge_visual_sim_thresh: float,
+    merge_text_sim_thresh: float,
+    objects: MapObjectList,
+    overlap_matrix: np.ndarray,
+    downsample_voxel_size: float,
+    dbscan_remove_noise: bool,
+    dbscan_eps: float,
+    dbscan_min_points: int,
+    spatial_sim_type: str,
+    device: str,
+):
     x, y = overlap_matrix.nonzero()
     overlap_ratio = overlap_matrix[x, y]
-
-    sort = np.argsort(overlap_ratio)[::-1]  # Sort indices of overlap ratios in descending order
+    
+    # Sort indices of overlap ratios in descending order
+    sort = np.argsort(overlap_ratio)[::-1]  
     x = x[sort]
     y = y[sort]
     overlap_ratio = overlap_ratio[sort]
 
-    kept_objects = np.ones(len(objects), dtype=bool)  # Initialize all objects as 'kept' initially
+    kept_objects = np.ones(
+        len(objects), dtype=bool
+    )  # Initialize all objects as 'kept' initially
     for i, j, ratio in zip(x, y, overlap_ratio):
         if ratio > merge_overlap_thresh:
             visual_sim = F.cosine_similarity(
-                to_tensor(objects[i]['clip_ft']),
-                to_tensor(objects[j]['clip_ft']),
-                dim=0
+                to_tensor(objects[i]["clip_ft"]),
+                to_tensor(objects[j]["clip_ft"]),
+                dim=0,
             )
             text_sim = F.cosine_similarity(
-                to_tensor(objects[i]['text_ft']),
-                to_tensor(objects[j]['text_ft']),
-                dim=0
+                to_tensor(objects[i]["text_ft"]),
+                to_tensor(objects[j]["text_ft"]),
+                dim=0,
             )
-            if visual_sim > merge_visual_sim_thresh and text_sim > merge_text_sim_thresh:
-                if kept_objects[j]:  # Check if the target object has not been merged into another
+            if (
+                visual_sim > merge_visual_sim_thresh
+                and text_sim > merge_text_sim_thresh
+            ):
+                if kept_objects[
+                    j
+                ]:  # Check if the target object has not been merged into another
                     # Merge object i into object j
                     objects[j] = merge_obj2_into_obj1(
-                        objects[j], objects[i], 
-                        downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, 
-                        spatial_sim_type, device, 
-                        run_dbscan=True
+                        objects[j],
+                        objects[i],
+                        downsample_voxel_size,
+                        dbscan_remove_noise,
+                        dbscan_eps,
+                        dbscan_min_points,
+                        spatial_sim_type,
+                        device,
+                        run_dbscan=True,
                     )
                     kept_objects[i] = False  # Mark object i as 'merged'
         else:
@@ -360,59 +503,97 @@ def merge_overlap_objects(merge_overlap_thresh: float, merge_visual_sim_thresh: 
     # Create a new list of objects excluding those that were merged
     new_objects = [obj for obj, keep in zip(objects, kept_objects) if keep]
     objects = MapObjectList(new_objects)
-    
+
     return objects
 
-def denoise_objects(downsample_voxel_size: float, dbscan_remove_noise: bool, dbscan_eps: float, dbscan_min_points: int, spatial_sim_type: str, device: str, objects: MapObjectList):
+
+def denoise_objects(
+    downsample_voxel_size: float,
+    dbscan_remove_noise: bool,
+    dbscan_eps: float,
+    dbscan_min_points: int,
+    spatial_sim_type: str,
+    device: str,
+    objects: MapObjectList,
+):
     for i in range(len(objects)):
-        og_object_pcd = objects[i]['pcd']
+        og_object_pcd = objects[i]["pcd"]
         # Adjust the call to process_pcd with explicit parameters
-        objects[i]['pcd'] = process_pcd(objects[i]['pcd'], downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, run_dbscan=True)
-        if len(objects[i]['pcd'].points) < 4:
-            objects[i]['pcd'] = og_object_pcd
+        objects[i]["pcd"] = process_pcd(
+            objects[i]["pcd"],
+            downsample_voxel_size,
+            dbscan_remove_noise,
+            dbscan_eps,
+            dbscan_min_points,
+            run_dbscan=True,
+        )
+        if len(objects[i]["pcd"].points) < 4:
+            objects[i]["pcd"] = og_object_pcd
             continue
         # Adjust the call to get_bounding_box with explicit parameters
-        objects[i]['bbox'] = get_bounding_box(spatial_sim_type, objects[i]['pcd'])
-        objects[i]['bbox'].color = [0,1,0]
-        
+        objects[i]["bbox"] = get_bounding_box(spatial_sim_type, objects[i]["pcd"])
+        objects[i]["bbox"].color = [0, 1, 0]
+
     return objects
 
 
-def filter_objects(obj_min_points: int, obj_min_detections: int, objects: MapObjectList):
+def filter_objects(
+    obj_min_points: int, obj_min_detections: int, objects: MapObjectList
+):
     print("Before filtering:", len(objects))
     objects_to_keep = []
     for obj in objects:
-        if len(obj['pcd'].points) >= obj_min_points and obj['num_detections'] >= obj_min_detections:
+        if (
+            len(obj["pcd"].points) >= obj_min_points
+            and obj["num_detections"] >= obj_min_detections
+        ):
             objects_to_keep.append(obj)
     objects = MapObjectList(objects_to_keep)
     print("After filtering:", len(objects))
-    
-    return objects
-    
 
-def merge_objects(merge_overlap_thresh: float, merge_visual_sim_thresh: float, merge_text_sim_thresh: float, objects: MapObjectList, downsample_voxel_size: float, dbscan_remove_noise: bool, dbscan_eps: float, dbscan_min_points: int, spatial_sim_type: str, device: str):
+    return objects
+
+
+def merge_objects(
+    merge_overlap_thresh: float,
+    merge_visual_sim_thresh: float,
+    merge_text_sim_thresh: float,
+    objects: MapObjectList,
+    downsample_voxel_size: float,
+    dbscan_remove_noise: bool,
+    dbscan_eps: float,
+    dbscan_min_points: int,
+    spatial_sim_type: str,
+    device: str,
+):
     if merge_overlap_thresh > 0:
         # Assuming compute_overlap_matrix requires only `objects` and `downsample_voxel_size`
-        overlap_matrix = compute_overlap_matrix(objects, downsample_voxel_size)
+        overlap_matrix = compute_overlap_matrix_general(
+            objects_a=objects,
+            objects_b=None,
+            downsample_voxel_size=downsample_voxel_size,
+        )
         print("Before merging:", len(objects))
         # Pass all necessary configuration parameters to merge_overlap_objects
         objects = merge_overlap_objects(
-            merge_overlap_thresh=merge_overlap_thresh, 
-            merge_visual_sim_thresh=merge_visual_sim_thresh, 
-            merge_text_sim_thresh=merge_text_sim_thresh, 
-            objects=objects, 
-            overlap_matrix=overlap_matrix, 
-            downsample_voxel_size=downsample_voxel_size, 
-            dbscan_remove_noise=dbscan_remove_noise, 
-            dbscan_eps=dbscan_eps, 
-            dbscan_min_points=dbscan_min_points, 
-            spatial_sim_type=spatial_sim_type, 
-            device=device
+            merge_overlap_thresh=merge_overlap_thresh,
+            merge_visual_sim_thresh=merge_visual_sim_thresh,
+            merge_text_sim_thresh=merge_text_sim_thresh,
+            objects=objects,
+            overlap_matrix=overlap_matrix,
+            downsample_voxel_size=downsample_voxel_size,
+            dbscan_remove_noise=dbscan_remove_noise,
+            dbscan_eps=dbscan_eps,
+            dbscan_min_points=dbscan_min_points,
+            spatial_sim_type=spatial_sim_type,
+            device=device,
         )
         print("After merging:", len(objects))
 
     return objects
 
+
+@profile
 def filter_gobs(
     gobs: dict,
     image: np.ndarray,
@@ -425,38 +606,46 @@ def filter_gobs(
     # If no detection at all
     if len(gobs['xyxy']) == 0:
         return gobs
-    
+
     # Filter out the objects based on various criteria
     idx_to_keep = []
     for mask_idx in range(len(gobs['xyxy'])):
         local_class_id = gobs['class_id'][mask_idx]
         class_name = gobs['classes'][local_class_id]
-        
+
         # Skip masks that are too small
-        if gobs['mask'][mask_idx].sum() < max(mask_area_threshold, 10):
+        mask_area = gobs['mask'][mask_idx].sum()
+        if mask_area < max(mask_area_threshold, 10):
+            logging.debug(f"Skipped due to small mask area ({mask_area} pixels) - Class: {class_name}")
             continue
-        
+
         # Skip the BG classes
         if skip_bg and class_name in BG_CLASSES:
+            logging.debug(f"Skipped background class: {class_name}")
             continue
-        
+
         # Skip the non-background boxes that are too large
         if class_name not in BG_CLASSES:
             x1, y1, x2, y2 = gobs['xyxy'][mask_idx]
             bbox_area = (x2 - x1) * (y2 - y1)
             image_area = image.shape[0] * image.shape[1]
             if max_bbox_area_ratio is not None and bbox_area > max_bbox_area_ratio * image_area:
+                logging.debug(f"Skipped due to large bounding box area ratio - Class: {class_name}, Area Ratio: {bbox_area/image_area:.4f}")
                 continue
-            
+
         # Skip masks with low confidence
         if mask_conf_threshold is not None and gobs['confidence'] is not None:
             if gobs['confidence'][mask_idx] < mask_conf_threshold:
+                # logging.debug(f"Skipped due to low confidence ({gobs['confidence'][mask_idx]}) - Class: {class_name}")
                 continue
-        
+
         idx_to_keep.append(mask_idx)
-    
+
+    # for key in gobs.keys():
+    #     print(key, type(gobs[key]), len(gobs[key]))
+
     for k in gobs.keys():
-        if isinstance(gobs[k], str) or k == "classes": # Captions
+        if isinstance(gobs[k], str) or k == "classes":  # Captions
             continue
         elif isinstance(gobs[k], list):
             gobs[k] = [gobs[k][i] for i in idx_to_keep]
@@ -464,39 +653,40 @@ def filter_gobs(
             gobs[k] = gobs[k][idx_to_keep]
         else:
             raise NotImplementedError(f"Unhandled type {type(gobs[k])}")
-    
+
     return gobs
 
-def resize_gobs(
-    gobs,
-    image
-):
-    n_masks = len(gobs['xyxy'])
 
-    new_mask = []
-    
-    for mask_idx in range(n_masks):
+def resize_gobs(gobs, image):
+
+    # If the shapes are the same, no resizing is necessary
+    if gobs['mask'].shape[1:] == image.shape[:2]:
+        return gobs
+
+    new_masks = []
+
+    for mask_idx in range(len(gobs['xyxy'])):
         # TODO: rewrite using interpolation/resize in numpy or torch rather than cv2
         mask = gobs['mask'][mask_idx]
-        if mask.shape != image.shape[:2]:
-            # Rescale the xyxy coordinates to the image shape
-            x1, y1, x2, y2 = gobs['xyxy'][mask_idx]
-            x1 = round(x1 * image.shape[1] / mask.shape[1])
-            y1 = round(y1 * image.shape[0] / mask.shape[0])
-            x2 = round(x2 * image.shape[1] / mask.shape[1])
-            y2 = round(y2 * image.shape[0] / mask.shape[0])
-            gobs['xyxy'][mask_idx] = [x1, y1, x2, y2]
-            
-            # Reshape the mask to the image shape
-            mask = cv2.resize(mask.astype(np.uint8), image.shape[:2][::-1], interpolation=cv2.INTER_NEAREST)
-            mask = mask.astype(bool)
-            new_mask.append(mask)
+        # Rescale the xyxy coordinates to the image shape
+        x1, y1, x2, y2 = gobs['xyxy'][mask_idx]
+        x1 = round(x1 * image.shape[1] / mask.shape[1])
+        y1 = round(y1 * image.shape[0] / mask.shape[0])
+        x2 = round(x2 * image.shape[1] / mask.shape[1])
+        y2 = round(y2 * image.shape[0] / mask.shape[0])
+        gobs['xyxy'][mask_idx] = [x1, y1, x2, y2]
 
-    if len(new_mask) > 0:
-        gobs['mask'] = np.asarray(new_mask)
-        
+        # Reshape the mask to the image shape
+        mask = cv2.resize(mask.astype(np.uint8), image.shape[:2][::-1], interpolation=cv2.INTER_NEAREST)
+        mask = mask.astype(bool)
+        new_masks.append(mask)
+
+    if len(new_masks) > 0:
+        gobs['mask'] = np.asarray(new_masks)
+
     return gobs
 
+@profile
 def gobs_to_detection_list(
     image, 
     depth_array,
@@ -506,11 +696,7 @@ def gobs_to_detection_list(
     trans_pose = None,
     class_names = None,
     BG_CLASSES  = None,
-    skip_bg = None,
     color_path = None,
-    mask_area_threshold: int = None,
-    max_bbox_area_ratio: float = None,
-    mask_conf_threshold: float = None,
     min_points_threshold: int = None,
     spatial_sim_type: str = None,
     downsample_voxel_size: float = None,  # New parameter
@@ -525,16 +711,16 @@ def gobs_to_detection_list(
     fg_detection_list = DetectionList()
     bg_detection_list = DetectionList()
     
-    gobs = resize_gobs(gobs, image)
-    gobs = filter_gobs(
-        gobs, 
-        image, 
-        skip_bg=skip_bg,
-        BG_CLASSES=BG_CLASSES,
-        mask_area_threshold=mask_area_threshold,
-        max_bbox_area_ratio=max_bbox_area_ratio,
-        mask_conf_threshold=mask_conf_threshold,
-    )
+    # gobs = resize_gobs(gobs, image)
+    # gobs = filter_gobs(
+    #     gobs, 
+    #     image, 
+    #     skip_bg=skip_bg,
+    #     BG_CLASSES=BG_CLASSES,
+    #     mask_area_threshold=mask_area_threshold,
+    #     max_bbox_area_ratio=max_bbox_area_ratio,
+    #     mask_conf_threshold=mask_conf_threshold,
+    # )
     
     if len(gobs['xyxy']) == 0:
         return fg_detection_list, bg_detection_list
@@ -542,7 +728,7 @@ def gobs_to_detection_list(
     # Compute the containing relationship among all detections and subtract fg from bg objects
     xyxy = gobs['xyxy']
     mask = gobs['mask']
-    gobs['mask'] = mask_subtract_contained(xyxy, mask)
+    # gobs['mask'] = mask_subtract_contained(xyxy, mask)
     
     n_masks = len(gobs['xyxy'])
     for mask_idx in range(n_masks):
@@ -629,14 +815,278 @@ def transform_detection_list(
         transformed_detection_list: DetectionList
     '''
     transform = to_numpy(transform)
-    
+
     if deepcopy:
         detection_list = copy.deepcopy(detection_list)
-    
+
     for i in range(len(detection_list)):
         detection_list[i]['pcd'] = detection_list[i]['pcd'].transform(transform)
         detection_list[i]['bbox'] = detection_list[i]['bbox'].rotate(transform[:3, :3], center=(0, 0, 0))
         detection_list[i]['bbox'] = detection_list[i]['bbox'].translate(transform[:3, 3])
         # detection_list[i]['bbox'] = detection_list[i]['pcd'].get_oriented_bounding_box(robust=True)
-    
+
     return detection_list
+
+
+def make_detection_list_from_pcd_and_gobs(
+    obj_pcds_and_bboxes, gobs, color_path, obj_classes, image_idx
+):
+    '''
+    This function makes a detection list for the objects
+    Ideally I don't want it to be needed, the detection list has too much info and is inefficient
+    '''
+    detection_list = DetectionList()
+    # bg_detection_list = DetectionList()
+    for mask_idx in range(len(gobs['mask'])):
+        if obj_pcds_and_bboxes[mask_idx] is None: # pointcloud was discarded
+            continue
+
+        curr_class_name = gobs['classes'][gobs['class_id'][mask_idx]]
+        curr_class_idx = obj_classes.get_classes_arr().index(curr_class_name)
+        
+        is_bg_object = bool(curr_class_name in obj_classes.get_bg_classes_arr())
+        
+        detected_object = {
+            'image_idx' : [image_idx],                             # idx of the image
+            'mask_idx' : [mask_idx],                         # idx of the mask/detection
+            'color_path' : [color_path],                     # path to the RGB image
+            'class_name' : curr_class_name,                         # global class id for this detection
+            'class_id' : [curr_class_idx],                         # global class id for this detection
+            'num_detections' : 1,                            # number of detections in this object
+            'mask': gobs['mask'][mask_idx],
+            'xyxy': [gobs['xyxy'][mask_idx]],
+            'conf': [gobs['confidence'][mask_idx]],
+            'n_points': len(obj_pcds_and_bboxes[mask_idx]['pcd'].points),
+            # 'pixel_area': [mask.sum()],
+            'contain_number': [None],                          # This will be computed later
+            "inst_color": np.random.rand(3),                 # A random color used for this segment instance
+            'is_background': is_bg_object,
+            
+            # These are for the entire 3D object
+            'pcd': obj_pcds_and_bboxes[mask_idx]['pcd'],
+            'bbox': obj_pcds_and_bboxes[mask_idx]['bbox'],
+            'clip_ft': to_tensor(gobs['image_feats'][mask_idx]),
+            'text_ft': to_tensor(gobs['text_feats'][mask_idx]),
+        }
+        
+        # if is_bg_object:
+        #     bg_detection_list.append(detected_object)
+        # else:
+        detection_list.append(detected_object)
+    
+    return detection_list # , bg_detection_list
+
+
+def dynamic_downsample(points, colors=None, target=5000):
+    """
+    Simplified and configurable downsampling function that dynamically adjusts the 
+    downsampling rate based on the number of input points. If a target of -1 is provided, 
+    downsampling is bypassed, returning the original points and colors.
+
+    Args:
+        points (torch.Tensor): Tensor of shape (N, 3) for N points.
+        target (int): Target number of points to aim for in the downsampled output, 
+                      or -1 to bypass downsampling.
+        colors (torch.Tensor, optional): Corresponding colors tensor of shape (N, 3). 
+                                         Defaults to None.
+
+    Returns:
+        Tuple[torch.Tensor, Optional[torch.Tensor]]: Downsampled points and optionally 
+                                                     downsampled colors, or the original 
+                                                     points and colors if target is -1.
+    """
+    # Check if downsampling is bypassed
+    if target == -1:
+        return points, colors
+    
+    num_points = points.size(0)
+    
+    # If the number of points is less than or equal to the target, return the original points and colors
+    if num_points <= target:
+        return points, colors
+    
+    # Calculate downsampling factor to aim for the target number of points
+    downsample_factor = max(1, num_points // target)
+    
+    # Select points based on the calculated downsampling factor
+    downsampled_points = points[::downsample_factor]
+    
+    # If colors are provided, downsample them with the same factor
+    downsampled_colors = colors[::downsample_factor] if colors is not None else None
+
+    return downsampled_points, downsampled_colors
+
+
+def batch_mask_depth_to_points_colors(
+    depth_tensor: torch.Tensor,
+    masks_tensor: torch.Tensor,
+    cam_K: torch.Tensor,
+    image_rgb_tensor: torch.Tensor = None,  # Parameter for RGB image tensor
+    device: str = 'cuda'
+) -> tuple:
+    """
+    Converts a batch of masked depth images to 3D points and corresponding colors.
+
+    Args:
+        depth_tensor (torch.Tensor): A tensor of shape (N, H, W) representing the depth images.
+        masks_tensor (torch.Tensor): A tensor of shape (N, H, W) representing the masks for each depth image.
+        cam_K (torch.Tensor): A tensor of shape (3, 3) representing the camera intrinsic matrix.
+        image_rgb_tensor (torch.Tensor, optional): A tensor of shape (N, H, W, 3) representing the RGB images. Defaults to None.
+        device (str, optional): The device to perform the computation on. Defaults to 'cuda'.
+
+    Returns:
+        tuple: A tuple containing the 3D points tensor of shape (N, H, W, 3) and the colors tensor of shape (N, H, W, 3).
+    """
+    N, H, W = masks_tensor.shape
+    fx, fy, cx, cy = cam_K[0, 0], cam_K[1, 1], cam_K[0, 2], cam_K[1, 2]
+    
+    # Generate grid of pixel coordinates
+    y, x = torch.meshgrid(torch.arange(0, H, device=device), torch.arange(0, W, device=device), indexing='ij')
+    z = depth_tensor.repeat(N, 1, 1) * masks_tensor  # Apply masks to depth
+
+    valid = (z > 0).float()  # Mask out zeros
+
+    x = (x - cx) * z / fx
+    y = (y - cy) * z / fy
+    
+    points = torch.stack((x, y, z), dim=-1) * valid.unsqueeze(-1)  # Shape: (N, H, W, 3)
+
+    if image_rgb_tensor is not None:
+        # Repeat RGB image for each mask and apply masks
+        repeated_rgb = image_rgb_tensor.repeat(N, 1, 1, 1) * masks_tensor.unsqueeze(-1)
+        colors = repeated_rgb * valid.unsqueeze(-1)  # Apply valid mask to filter out background
+    else:
+        print("No RGB image provided, assigning random colors to objects")
+        # log it as well
+        logging.warning("No RGB image provided, assigning random colors to objects")
+        # Generate a random color for each mask
+        random_colors = torch.randint(0, 256, (N, 3), device=device, dtype=torch.float32) / 255.0  # RGB colors in [0, 1]
+        # Expand dims to match (N, H, W, 3) and apply to valid points
+        colors = random_colors.unsqueeze(1).unsqueeze(1).expand(-1, H, W, -1) * valid.unsqueeze(-1)
+
+    return points, colors
+
+
+def detections_to_obj_pcd_and_bbox(
+    depth_array, 
+    masks, 
+    cam_K, 
+    image_rgb=None, 
+    trans_pose=None, 
+    min_points_threshold=5, 
+    spatial_sim_type='axis_aligned', 
+    obj_pcd_max_points = None,
+    device='cuda'
+):
+    """
+    This function processes a batch of objects to create colored point clouds, apply transformations, and compute bounding boxes.
+
+    Args:
+        depth_array (numpy.ndarray): Array containing depth values.
+        masks (numpy.ndarray): Array containing binary masks for each object.
+        cam_K (numpy.ndarray): Camera intrinsic matrix.
+        image_rgb (numpy.ndarray, optional): RGB image. Defaults to None.
+        trans_pose (numpy.ndarray, optional): Transformation matrix. Defaults to None.
+        min_points_threshold (int, optional): Minimum number of points required for an object. Defaults to 5.
+        spatial_sim_type (str, optional): Type of spatial similarity. Defaults to 'axis_aligned'.
+        device (str, optional): Device to use. Defaults to 'cuda'.
+
+    Returns:
+        list: List of dictionaries containing processed objects. Each dictionary contains a point cloud and a bounding box.
+    """
+    N, H, W = masks.shape
+
+    # Convert inputs to tensors and move to the specified device
+    depth_tensor = torch.from_numpy(depth_array).to(device).float()
+    masks_tensor = torch.from_numpy(masks).to(device).float()
+    cam_K_tensor = torch.from_numpy(cam_K).to(device).float()
+
+    if image_rgb is not None:
+        image_rgb_tensor = torch.from_numpy(image_rgb).to(device).float() / 255.0  # Normalize RGB values
+    else:
+        image_rgb_tensor = None
+
+    points_tensor, colors_tensor = batch_mask_depth_to_points_colors(
+        depth_tensor, masks_tensor, cam_K_tensor, image_rgb_tensor, device
+    )
+
+    processed_objects = [None] * N  # Initialize with placeholders
+    for i in range(N):
+        mask_points = points_tensor[i]
+        mask_colors = colors_tensor[i] if colors_tensor is not None else None
+
+        valid_points_mask = mask_points[:, :, 2] > 0
+        if torch.sum(valid_points_mask) < min_points_threshold:
+            continue
+
+        valid_points = mask_points[valid_points_mask]
+        valid_colors = mask_colors[valid_points_mask] if mask_colors is not None else None
+
+        downsampled_points, downsampled_colors = dynamic_downsample(valid_points, colors=valid_colors, target=obj_pcd_max_points)
+
+        # Create point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(downsampled_points.cpu().numpy())
+        if downsampled_colors is not None:
+            pcd.colors = o3d.utility.Vector3dVector(downsampled_colors.cpu().numpy())
+
+        if trans_pose is not None:
+            pcd.transform(trans_pose)  # Apply transformation directly to the point cloud
+
+        bbox = get_bounding_box(spatial_sim_type, pcd)
+        if bbox.volume() < 1e-6:
+            continue
+
+        processed_objects[i] = {'pcd': pcd, 'bbox': bbox}
+
+    return processed_objects
+
+
+def processing_needed(
+    process_interval, run_on_final_frame, frame_idx, is_final_frame=False
+):
+
+    if process_interval > 0 and (frame_idx+1) % process_interval == 0:
+        return True
+    if run_on_final_frame and is_final_frame:
+        return True
+    return False
+
+
+def prepare_objects_save_vis(objects: MapObjectList, downsample_size: float=0.025):
+    objects_to_save = copy.deepcopy(objects)
+            
+    # Downsample the point cloud
+    for i in range(len(objects_to_save)):
+        objects_to_save[i]['pcd'] = objects_to_save[i]['pcd'].voxel_down_sample(downsample_size)
+
+    # Remove unnecessary keys
+    for i in range(len(objects_to_save)):
+        for k in list(objects_to_save[i].keys()):
+            if k not in [
+                'pcd', 'bbox', 'clip_ft', 'text_ft', 'class_id', 'num_detections', 'inst_color'
+            ]:
+                del objects_to_save[i][k]
+                
+    return objects_to_save.to_serializable()
+
+
+def process_cfg(cfg: DictConfig):
+    cfg.dataset_root = Path(cfg.dataset_root)
+    cfg.dataset_config = Path(cfg.dataset_config)
+    
+    if cfg.dataset_config.name != "multiscan.yaml":
+        # For datasets whose depth and RGB have the same resolution
+        # Set the desired image heights and width from the dataset config
+        dataset_cfg = omegaconf.OmegaConf.load(cfg.dataset_config)
+        if cfg.image_height is None:
+            cfg.image_height = dataset_cfg.camera_params.image_height
+        if cfg.image_width is None:
+            cfg.image_width = dataset_cfg.camera_params.image_width
+        print(f"Setting image height and width to {cfg.image_height} x {cfg.image_width}")
+    else:
+        # For dataset whose depth and RGB have different resolutions
+        assert cfg.image_height is not None and cfg.image_width is not None, \
+            "For multiscan dataset, image height and width must be specified"
+
+    return cfg

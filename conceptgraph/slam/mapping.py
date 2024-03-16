@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+from typing import List, Optional
+
 from conceptgraph.slam.slam_classes import MapObjectList, DetectionList
 from conceptgraph.utils.general_utils import Timer
 from conceptgraph.utils.ious import (
@@ -10,6 +12,7 @@ from conceptgraph.utils.ious import (
     compute_3d_giou_accurate_batch,
 )
 from conceptgraph.slam.utils import (
+    compute_overlap_matrix_general,
     merge_obj2_into_obj1, 
     compute_overlap_matrix_2set
 )
@@ -27,7 +30,7 @@ def compute_spatial_similarities(spatial_sim_type: str, detection_list: Detectio
     elif spatial_sim_type == "giou_accurate":
         spatial_sim = compute_3d_giou_accurate_batch(det_bboxes, obj_bboxes)
     elif spatial_sim_type == "overlap":
-        spatial_sim = compute_overlap_matrix_2set(objects, detection_list, downsample_voxel_size)
+        spatial_sim = compute_overlap_matrix_general(objects, detection_list, downsample_voxel_size)
         spatial_sim = torch.from_numpy(spatial_sim).T
     else:
         raise ValueError(f"Invalid spatial similarity type: {spatial_sim_type}")
@@ -71,25 +74,95 @@ def aggregate_similarities(match_method: str, phys_bias: float, spatial_sim: tor
     
     return sims
 
+def match_detections_to_objects(
+    agg_sim: torch.Tensor, detection_threshold: float = float('-inf')
+) -> List[Optional[int]]:
+    """
+    Matches detections to objects based on similarity, returning match indices or None for unmatched.
+
+    Args:
+        agg_sim: Similarity matrix (detections vs. objects).
+        detection_threshold: Threshold for a valid match (default: -inf).
+
+    Returns:
+        List of matching object indices (or None if unmatched) for each detection.
+    """
+    match_indices = []
+    for detected_obj_idx in range(agg_sim.shape[0]):
+        max_sim_value = agg_sim[detected_obj_idx].max()
+        if max_sim_value <= detection_threshold:
+            match_indices.append(None)
+        else:
+            match_indices.append(agg_sim[detected_obj_idx].argmax().item())
+
+    return match_indices
+
+
+def merge_obj_matches(
+    detection_list: DetectionList,
+    objects: MapObjectList,
+    match_indices: List[Optional[int]],
+    downsample_voxel_size: float,
+    dbscan_remove_noise: bool,
+    dbscan_eps: float,
+    dbscan_min_points: int,
+    spatial_sim_type: str,
+    device: str,
+) -> MapObjectList:
+    """
+    Merges detected objects into existing objects based on a list of match indices.
+
+    Args:
+        detection_list (DetectionList): List of detected objects.
+        objects (MapObjectList): List of existing objects.
+        match_indices (List[Optional[int]]): Indices of existing objects each detected object matches with.
+        downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, spatial_sim_type, device:
+            Parameters for merging and similarity computation.
+
+    Returns:
+        MapObjectList: Updated list of existing objects with detected objects merged as appropriate.
+    """
+    for detected_obj_idx, existing_obj_match_idx in enumerate(match_indices):
+        if existing_obj_match_idx is None:
+            objects.append(detection_list[detected_obj_idx])
+        else:
+            detected_obj = detection_list[detected_obj_idx]
+            matched_obj = objects[existing_obj_match_idx]
+            merged_obj = merge_obj2_into_obj1(
+                obj1=matched_obj,
+                obj2=detected_obj,
+                downsample_voxel_size=downsample_voxel_size,
+                dbscan_remove_noise=dbscan_remove_noise,
+                dbscan_eps=dbscan_eps,
+                dbscan_min_points=dbscan_min_points,
+                spatial_sim_type=spatial_sim_type,
+                device=device,
+                run_dbscan=False,
+            )
+            objects[existing_obj_match_idx] = merged_obj
+
+    return objects
+
+
 def merge_detections_to_objects(
     downsample_voxel_size: float, dbscan_remove_noise: bool, dbscan_eps: float, dbscan_min_points: int,
     spatial_sim_type: str, device: str, match_method: str, phys_bias: float,
     detection_list: DetectionList, objects: MapObjectList, agg_sim: torch.Tensor
 ) -> MapObjectList:
-    for i in range(agg_sim.shape[0]):
-        if agg_sim[i].max() == float('-inf'):
-            objects.append(detection_list[i])
+    for detected_obj_idx in range(agg_sim.shape[0]):
+        if agg_sim[detected_obj_idx].max() == float('-inf'):
+            objects.append(detection_list[detected_obj_idx])
         else:
-            j = agg_sim[i].argmax()
-            matched_det = detection_list[i]
-            matched_obj = objects[j]
+            existing_obj_match_idx = agg_sim[detected_obj_idx].argmax()
+            detected_obj = detection_list[detected_obj_idx]
+            matched_obj = objects[existing_obj_match_idx]
             merged_obj = merge_obj2_into_obj1(
-                obj1=matched_obj, obj2=matched_det, 
+                obj1=matched_obj, obj2=detected_obj, 
                 downsample_voxel_size=downsample_voxel_size, dbscan_remove_noise=dbscan_remove_noise, 
                 dbscan_eps=dbscan_eps, dbscan_min_points=dbscan_min_points, 
                 spatial_sim_type=spatial_sim_type, device=device, 
                 run_dbscan=False
             )
-            objects[j] = merged_obj
+            objects[existing_obj_match_idx] = merged_obj
             
     return objects

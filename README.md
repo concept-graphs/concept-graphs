@@ -128,30 +128,20 @@ For example here is my `./conceptgraph/hydra_configs/streamlined_detections.yaml
 ```yaml
 defaults:
   - base
-  - base_mapping
+  - base_detections
   - replica
   - sam
   - classes
   - logging_level
+  - multirun_replica
   - _self_
 
-detections_exp_suffix: exp_s_detections_stride50_yes_bg_44_mr
 stride: 50
-exp_suffix: s_mapping_yes_bg_multirun_49
-save_video: !!bool True
-save_objects_all_frames: !!bool True
-# merge_interval: 5
-denoise_interval: 5
-
-hydra:
-  verbose: true
-  mode: MULTIRUN
-  sweeper:
-    params:
-      scene_id: room0, office0 # 
+exp_suffix: s_detections_stride50_yes_bg_44_mr
+save_video: false
 ```
 
-First the values are loaded from `base.yaml`, then `base_mapping.yaml` then `replica.yaml` and so on. If there is a conflict (i.e. two files are modifying the same config parameter), the values from the earlier file are overwritten. i.e. `replica.yaml` will overwrite any confliting values in `base.yaml` and so on.
+First the values are loaded from `base.yaml`, then `base_detections.yaml` then `replica.yaml` and so on. If there is a conflict (i.e. two files are modifying the same config parameter), the values from the earlier file are overwritten. i.e. `replica.yaml` will overwrite any confliting values in `base.yaml` and so on.
 
 Finally `_self_` is loaded, which are te values in `streamlined_detections.yaml` itself. This is where you can put your own custom values. Also feel free to add your own `.yaml` files to `./conceptgraph/hydra_configs/` and they will be loaded in the same way.
 
@@ -164,13 +154,13 @@ scene_id: room0
 render_camera_path: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/conceptgraph/dataset/dataconfigs/replica/replica_room0.json
 ```
 
-
-## Running the script
+## Running the detections script
 
 To run the script, simply run the following command from the `conceptgraph` directory:
 
 ```bash
-python scripts/streamlined_detections.py
+cd /path/to/code/concept-graphs/conceptgraph/
+python /scripts/streamlined_detections.py
 ```
 
 So for me it looks like this. Note that if you don't have the models installed, it should just automatically download them for you.
@@ -186,10 +176,147 @@ Done! Execution time of YOLO function: 1.32 seconds
 Downloading https://github.com/ultralytics/assets/releases/download/v8.1.0/mobile_sam.pt to 'mobile_sam.pt'...
 100%|████████████████████| 38.8M/38.8M [00:00<00:00, 115MB/s]
   9%|███████████▋        | 922/2000 [02:13<02:45,  6.50it/s]
+<... detection process continues ...>
 ```
 
-It will also save a copy of the configuration file in the experiment output directory, so you can see what settings were used for each run. Hope that helps!
+It will also save a copy of the configuration file in the experiment output directory, so you can see what settings were used for each run. 
 
+It will save the results in the corresponding dataset directory, in a folder called `exps`. It will name the folder with the `exp_suffix` you set in the configuration file, and also save a `config_params.json` file in that folder with the configuration parameters used for the run.
+
+Here is what the ouput of running the detections script looks like for `room0` in the `Replica` dataset:
+
+```bash
+.
+./Replica # This is the dataset root
+./Replica/room0 # This is the scene_id
+./Replica/room0/exps # This parent folder of all the results from conceptgraphs
+
+# This is the folder for the specific run, named according to the exp_suffix
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr 
+
+# This is where the visualizations are saved, they are images with bounding boxes and masks overlayed
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/vis 
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/vis/frame000000.jpg 
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/vis/frame000050.jpg
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/vis/frame000100.jpg
+... # rest of the frames
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/vis/frame001950.jpg
+
+# This is where the detection results are saved, they are in the form of pkl.gz files 
+# that contain a dictionary of the detection results
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/detections 
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/detections/frame000000.pkl.gz
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/detections/frame000050.pkl.gz
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/detections/frame000100.pkl.gz
+... # rest of the frames
+./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/detections/frame001950.pkl.gz
+```
+
+## Running the mapping script
+
+Similarly, you need to edit the `streamlined_mapping.yaml` file in the `./conceptgraph/hydra_configs/` directory to point to your paths. Note that you need to tell the mapping script which detection results to use, so you need to set the `detections_exp_suffix` to the `exp_suffix` of the detection run you want to use. So following the example above, you would set 
+```yaml
+detections_exp_suffix: s_detections_stride50_yes_bg_44_mr
+```
+in the `streamlined_mapping.yaml` file. Here is what my `streamlined_mapping.yaml` file looks like, again just for illustrative purposes. Note that it inludes a multirun mode, which is useful for automatically running conceptgraphs on multiple scenes sequentially.
+
+```yaml
+defaults:
+  - base
+  - base_mapping
+  - replica
+  - classes
+  - logging_level
+  - _self_
+
+detections_exp_suffix: exp_s_detections_stride50_yes_bg_44_mr
+stride: 50
+exp_suffix: s_mapping_yes_bg_multirun_49
+save_video: !!bool True
+save_objects_all_frames: !!bool True
+# merge_interval: 5
+denoise_interval: 5   
+# log_level: INFO
+
+hydra:
+  verbose: true
+  mode: MULTIRUN
+  sweeper:
+    params:
+      scene_id: room0, office0 # 
+```
+
+Once you have set up your mapping configuration, then you can run the mapping script with the following command:
+
+```bash
+cd /path/to/code/concept-graphs/conceptgraph/
+python slam/streamlined_mapping.py
+```
+
+And here is what the output folder looks like for the mapping script:
+
+```bash
+.
+./Replica # This is the dataset root
+./Replica/room0 # This is the scene_id
+./Replica/room0/exps # This parent folder of all the results from conceptgraphs
+
+# This is the mapping output folder for the specific run, named according to the exp_suffix
+./Replica/room0/exps/s_mapping_yes_bg_multirun_49/
+# This is the saved configuration file for the run
+./Replica/room0/exps/s_mapping_yes_bg_multirun_49/config_params.json
+# We also save the configuration file of the detection run which was used 
+./Replica/room0/exps/s_mapping_yes_bg_multirun_49/config_params_detections.json
+# The mapping results are saved in a pkl.gz file
+./Replica/room0/exps/s_mapping_yes_bg_multirun_49/pcd_s_mapping_yes_bg_multirun_49.pkl.gz
+# The video of the mapping process is saved in a mp4 file
+./Replica/room0/exps/s_mapping_yes_bg_multirun_49/s_mapping_s_mapping_yes_bg_multirun_49.mp4
+# If you set save_objects_all_frames=True, then the object mapping results are saved in a folder
+./Replica/room0/exps/s_mapping_yes_bg_multirun_49//saved_obj_all_frames
+# In the saved_obj_all_frames folder, there is a folder for each detection run used, and in each of those folders there is a pkl.gz file for each object mapping result
+./Replica/room0/exps/s_mapping_yes_bg_multirun_49/saved_obj_all_frames/det_exp_s_detections_stride50_yes_bg_44_mr
+000001.pkl.gz
+000002.pkl.gz
+000003.pkl.gz
+...
+000039.pkl.gz
+meta.pkl.gz
+```
+
+## Running the visualization script
+
+This script allows you to vizluatize the map in 3D and query the map objects with text. 
+
+```bash
+cd /path/to/code/concept-graphs/conceptgraph/
+python scripts/visualize_cfslam_results.py --result_path /path/to/output.pkl.gz
+```
+
+So for the above example this would look like 
+
+```bash
+cd /path/to/code/concept-graphs/conceptgraph/
+python scripts/visualize_cfslam_results.py --result_path /path/to/code/concept-graphs/conceptgraph/Replica/room0/exps/s_mapping_yes_bg_multirun_49/pcd_s_mapping_yes_bg_multirun_49.pkl.gz
+```
+
+Then in the open3d visualizer window, you can use the following key callbacks to change the visualization. 
+* Press `b` to toggle the background point clouds (wall, floor, ceiling, etc.). Only works on the ConceptGraphs-Detect.
+* Press `c` to color the point clouds by the object class from the tagging model. Only works on the ConceptGraphs-Detect.
+* Press `r` to color the point clouds by RGB. 
+* Press `f` and type text in the terminal, and the point cloud will be colored by the CLIP similarity with the input text. 
+* Press `i` to color the point clouds by object instance ID. 
+
+Here is what it looks like to search for "cabinet" in the Replica `room0` scene.
+
+First we run the script, and then press `f` to trigger the `Enter your query:` input 
+
+![CabinetPreSearch](./assets/cg_cabinet_pre_search.jpeg)
+
+And then we can type `cabinet` and press enter, and the point cloud will be colored by the CLIP similarity with the input text.
+
+![CabinetSearch](./assets/cg_cabinet_search.jpeg)
+
+That's all for now, we will keep updating this README with more information as we go.
 
 
 # OLD README FOR CONCEPTGRAPHS BELOW 

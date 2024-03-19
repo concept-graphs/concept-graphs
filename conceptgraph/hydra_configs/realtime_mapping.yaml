@@ -1,0 +1,28 @@
+defaults:
+  - base
+  - base_mapping
+  - replica
+  - sam
+  - classes
+  - logging_level
+  - _self_
+  
+
+# hydra:
+#   verbose : true
+
+detections_exp_suffix: exp_s_detections_stride50_yes_bg_44_mr
+stride: 50
+exp_suffix: s_mapping_yes_bg_multirun_49
+save_video: !!bool True
+save_objects_all_frames: !!bool True
+# merge_interval: 5
+denoise_interval: 5   
+# log_level: INFO
+
+hydra:
+  verbose: true
+  mode: MULTIRUN
+  sweeper:
+    params:
+      scene_id: room0, office0 # 

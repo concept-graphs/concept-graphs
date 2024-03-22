@@ -3,6 +3,8 @@ import copy
 import json
 import logging
 from pathlib import Path
+# from conceptgraph.utils.logging_metrics import track_denoising, 
+from conceptgraph.utils.logging_metrics import DenoisingTracker 
 import cv2
 from line_profiler import profile
 
@@ -15,6 +17,7 @@ import torch
 import torch.nn.functional as F
 
 import faiss
+import uuid
 
 from conceptgraph.utils.general_utils import measure_time, to_tensor, to_numpy, Timer
 from conceptgraph.slam.slam_classes import MapObjectList, DetectionList
@@ -191,7 +194,7 @@ def merge_obj2_into_obj1(obj1, obj2, downsample_voxel_size, dbscan_remove_noise,
     n_obj2_det = obj2['num_detections']
     
     for k in obj1.keys():
-        if k in ['class_name', 'mask']:
+        if k in ['class_name', 'mask', 'id']:
             continue
         if k in ['caption']:
             # Here we need to merge two dictionaries and adjust the key of the second one
@@ -394,6 +397,9 @@ def compute_overlap_matrix_general(objects_a: MapObjectList, objects_b = None, d
     if downsample_voxel_size is None:
         raise ValueError("downsample_voxel_size is not provided")
 
+    # hardcoding for now because its this value is actually not supposed to be the downsample voxel size
+    downsample_voxel_size = 0.025
+
     # are we doing self comparison?
     same_objects = objects_b is None
     objects_b = objects_a if same_objects else objects_b
@@ -516,24 +522,36 @@ def denoise_objects(
     device: str,
     objects: MapObjectList,
 ):
+    tracker = DenoisingTracker()  # Get the singleton instance of DenoisingTracker
+    logging.debug(f"Starting denoising with {len(objects)} objects")
     for i in range(len(objects)):
         og_object_pcd = objects[i]["pcd"]
-        # Adjust the call to process_pcd with explicit parameters
-        objects[i]["pcd"] = process_pcd(
-            objects[i]["pcd"],
-            downsample_voxel_size,
-            dbscan_remove_noise,
-            dbscan_eps,
-            dbscan_min_points,
-            run_dbscan=True,
-        )
-        if len(objects[i]["pcd"].points) < 4:
+        
+        if len(og_object_pcd.points) <= 3000: # no need to denoise
             objects[i]["pcd"] = og_object_pcd
-            continue
+        else:
+            # Adjust the call to process_pcd with explicit parameters
+            objects[i]["pcd"] = process_pcd(
+                objects[i]["pcd"],
+                downsample_voxel_size,
+                dbscan_remove_noise,
+                dbscan_eps,
+                dbscan_min_points,
+                run_dbscan=True,
+            )
+            if len(objects[i]["pcd"].points) < 4:
+                objects[i]["pcd"] = og_object_pcd
+
         # Adjust the call to get_bounding_box with explicit parameters
         objects[i]["bbox"] = get_bounding_box(spatial_sim_type, objects[i]["pcd"])
         objects[i]["bbox"].color = [0, 1, 0]
-
+        logging.debug(f"Finished denoising object {i} out of {len(objects)}")
+        # Use the tracker's method
+        tracker.track_denoising(objects[i]["id"], len(og_object_pcd.points), len(objects[i]["pcd"].points))
+        
+        # track_denoising(objects[i]["id"], len(og_object_pcd.points), len(objects[i]["pcd"].points))
+        logging.debug(f"before denoising: {len(og_object_pcd.points)}, after denoising: {len(objects[i]['pcd'].points)}")
+    logging.debug(f"Finished denoising with {len(objects)} objects")
     return objects
 
 
@@ -770,6 +788,7 @@ def gobs_to_detection_list(
         # Treat the detection in the same way as a 3D object
         # Store information that is enough to recover the detection
         detected_object = {
+            'id' : uuid.uuid4(),
             'image_idx' : [idx],                             # idx of the image
             'mask_idx' : [mask_idx],                         # idx of the mask/detection
             'color_path' : [color_path],                     # path to the RGB image
@@ -847,6 +866,7 @@ def make_detection_list_from_pcd_and_gobs(
         is_bg_object = bool(curr_class_name in obj_classes.get_bg_classes_arr())
         
         detected_object = {
+            'id' : uuid.uuid4(),
             'image_idx' : [image_idx],                             # idx of the image
             'mask_idx' : [mask_idx],                         # idx of the mask/detection
             'color_path' : [color_path],                     # path to the RGB image

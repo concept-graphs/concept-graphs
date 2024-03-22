@@ -3,10 +3,20 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 '''
 
 # Standard library imports
+from conceptgraph.utils.logging_metrics import DenoisingTracker
+import cv2
+import os
+import PyQt5
+
+# Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
+pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
+os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
+
+
 import copy
 from conceptgraph.slam.cfslam_pipeline_batch import prepare_objects_save_vis
 from conceptgraph.utils.model_utils import compute_clip_features_batched
-import cv2
+
 from line_profiler import profile
 import os
 from pathlib import Path
@@ -81,23 +91,52 @@ def main(cfg : DictConfig):
         dtype=torch.float,
     )
     # cam_K = dataset.get_cam_K()
-
-    ## Initialize the detection models
-    detection_model = measure_time(YOLO)('yolov8l-world.pt')
-    sam_predictor = SAM('mobile_sam.pt') # UltraLytics SAM
-    # sam_predictor = measure_time(get_sam_predictor)(cfg) # Normal SAM
-    clip_model, _, clip_preprocess = open_clip.create_model_and_transforms(
-        "ViT-H-14", "laion2b_s32b_b79k"
-    )
-    clip_model = clip_model.to(cfg.device)
-    clip_tokenizer = open_clip.get_tokenizer("ViT-H-14")
     
-    # Set the classes for the detection model
-    
-    # classes = [line.strip() for line in open(cfg.classes_file)]
-    # classes = [cls for cls in classes if cls not in bg_classes] # remove background classes
     obj_classes = ObjectClasses(cfg.classes_file, bg_classes=cfg.bg_classes, skip_bg=cfg.skip_bg)
-    detection_model.set_classes(obj_classes.get_classes_arr())
+    
+    # output folder for this mapping experiment
+    exp_out_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.exp_suffix)
+
+    
+    # If we need to do detections 
+    det_exp_path = None
+    run_detections = None
+    if cfg.detections_exp_suffix is not None:
+        det_exp_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.detections_exp_suffix)
+        run_detections = cfg.force_detection or not os.path.exists(det_exp_path)
+    else:
+        run_detections = False
+        
+    if run_detections:
+
+        ## Initialize the detection models
+        detection_model = measure_time(YOLO)('yolov8l-world.pt')
+        sam_predictor = SAM('mobile_sam.pt') # UltraLytics SAM
+        # sam_predictor = measure_time(get_sam_predictor)(cfg) # Normal SAM
+        clip_model, _, clip_preprocess = open_clip.create_model_and_transforms(
+            "ViT-H-14", "laion2b_s32b_b79k"
+        )
+        clip_model = clip_model.to(cfg.device)
+        clip_tokenizer = open_clip.get_tokenizer("ViT-H-14")
+        
+        # Set the classes for the detection model
+        
+        # classes = [line.strip() for line in open(cfg.classes_file)]
+        # classes = [cls for cls in classes if cls not in bg_classes] # remove background classes
+        
+        detection_model.set_classes(obj_classes.get_classes_arr())
+        
+        if cfg.save_detections:
+            # make the folders to save detections 
+            det_exp_out_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.detections_exp_suffix)
+            det_vis_folder_path = get_vis_out_path(det_exp_out_path)
+            det_detections_folder_path = get_det_out_path(det_exp_out_path)
+            save_hydra_config(cfg, det_exp_out_path, is_detection_config=True)
+    else:
+        det_exp_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.detections_exp_suffix)
+        detections_folder = get_det_out_path(det_exp_path)
+        detections_exp_cfg = load_saved_hydra_json_config(det_exp_path)
+        save_hydra_config(detections_exp_cfg, exp_out_path, is_detection_config=True)
 
     objects = MapObjectList(device=cfg.device)
 
@@ -111,10 +150,9 @@ def main(cfg : DictConfig):
         )
         frames = []
 
-    # output folder for this mapping experiment
-    exp_out_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.exp_suffix)
     
-    vis_folder_path = get_vis_out_path(exp_out_path)
+    
+    # vis_folder_path = get_vis_out_path(exp_out_path)
 
     # output folder of the detections experiment to use
     # det_exp_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.detections_exp_suffix)
@@ -141,62 +179,81 @@ def main(cfg : DictConfig):
         # Read info about current frame from dataset
         # color image
         color_path = Path(dataset.color_paths[frame_idx])
-        vis_save_path = vis_folder_path / Path(color_path).name
+        
         
         
         # opencv can't read Path objects...
-        vis_save_path = str(vis_save_path)
+
         image = cv2.imread(str(color_path)) # This will in BGR color space
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
-        
-        
-        # Do initial object detection
-        results = detection_model.predict(color_path, conf=0.1, verbose=False)
-        confidences = results[0].boxes.conf.cpu().numpy()
-        detection_class_ids = results[0].boxes.cls.cpu().numpy().astype(int)
-        xyxy_tensor = results[0].boxes.xyxy
-        xyxy_np = xyxy_tensor.cpu().numpy()
-        
-        # Get Masks Using SAM or MobileSAM
-        # UltraLytics SAM
-        sam_out = sam_predictor.predict(color_path, bboxes=xyxy_tensor, verbose=False)
-        masks_tensor = sam_out[0].masks.data
-        
-        
-        masks_np = masks_tensor.cpu().numpy()
-        
-        # Create a detections object that we will save later
-        detections = sv.Detections(
-            xyxy=xyxy_np,
-            confidence=confidences,
-            class_id=detection_class_ids,
-            mask=masks_np,
-        )
-        
-        # Compute and save the clip features of detections  
-        image_crops, image_feats, text_feats = compute_clip_features_batched(
-            image_rgb, detections, clip_model, clip_preprocess, clip_tokenizer, obj_classes.get_classes_arr(), cfg.device)
+        results = None
+        raw_gobs = None
+        gobs = None # stands for grounded SAM observations
+        if run_detections:
 
-        
-        #Visualize and save the annotated image
-        annotated_image, labels = vis_result_fast(image, detections, obj_classes.get_classes_arr())
-        cv2.imwrite(vis_save_path, annotated_image)
-        
-        
-        # Save results 
-        # Convert the detections to a dict. The elements are in np.array
-        results = {
-            "xyxy": detections.xyxy,
-            "confidence": detections.confidence,
-            "class_id": detections.class_id,
-            "mask": detections.mask,
-            "classes": obj_classes.get_classes_arr(),
-            "image_crops": image_crops,
-            "image_feats": image_feats,
-            "text_feats": text_feats,
-        }
-        
+            # Do initial object detection
+            results = detection_model.predict(color_path, conf=0.1, verbose=False)
+            confidences = results[0].boxes.conf.cpu().numpy()
+            detection_class_ids = results[0].boxes.cls.cpu().numpy().astype(int)
+            xyxy_tensor = results[0].boxes.xyxy
+            xyxy_np = xyxy_tensor.cpu().numpy()
+            
+            # Get Masks Using SAM or MobileSAM
+            # UltraLytics SAM
+            sam_out = sam_predictor.predict(color_path, bboxes=xyxy_tensor, verbose=False)
+            masks_tensor = sam_out[0].masks.data
+            
+            
+            masks_np = masks_tensor.cpu().numpy()
+            
+            # Create a detections object that we will save later
+            detections = sv.Detections(
+                xyxy=xyxy_np,
+                confidence=confidences,
+                class_id=detection_class_ids,
+                mask=masks_np,
+            )
+            
+            # Compute and save the clip features of detections  
+            image_crops, image_feats, text_feats = compute_clip_features_batched(
+                image_rgb, detections, clip_model, clip_preprocess, clip_tokenizer, obj_classes.get_classes_arr(), cfg.device)
+
+            
+            
+            
+            # Save results 
+            # Convert the detections to a dict. The elements are in np.array
+            results = {
+                "xyxy": detections.xyxy,
+                "confidence": detections.confidence,
+                "class_id": detections.class_id,
+                "mask": detections.mask,
+                "classes": obj_classes.get_classes_arr(),
+                "image_crops": image_crops,
+                "image_feats": image_feats,
+                "text_feats": text_feats,
+            }
+            
+            # save the detections if needed 
+            if cfg.save_detections:
+                
+                vis_save_path = det_vis_folder_path / Path(color_path).name
+                vis_save_path = str(vis_save_path)
+                #Visualize and save the annotated image
+                annotated_image, labels = vis_result_fast(image, detections, obj_classes.get_classes_arr())
+                cv2.imwrite(vis_save_path, annotated_image)
+                
+                detections_name = (Path(vis_save_path).stem + ".pkl.gz")
+                with gzip.open(det_detections_folder_path / detections_name , "wb") as f:
+                    pickle.dump(results, f)
+        else:
+            # load the detections
+            detections_path = detections_folder / (color_path.stem + ".pkl.gz")
+            color_path = str(color_path)
+            detections_path = str(detections_path)
+            with gzip.open(detections_path, "rb") as f:
+                results = pickle.load(f)
         
         
         image_original_pil = Image.open(color_path)
@@ -214,12 +271,12 @@ def main(cfg : DictConfig):
         
 
         # Load image detections for the current frame
-        gobs = None # stands for grounded SAM observations
+        
         # detections_path = detections_folder / (color_path.stem + ".pkl.gz")
         color_path = str(color_path)
         # detections_path = str(detections_path)
 
-        raw_gobs = None
+        
         # with gzip.open(detections_path, "rb") as f:
         #     raw_gobs = pickle.load(f)
         raw_gobs = results
@@ -324,7 +381,7 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
-            objects = denoise_objects(
+            objects = measure_time(denoise_objects)(
                 downsample_voxel_size=cfg['downsample_voxel_size'], 
                 dbscan_remove_noise=cfg['dbscan_remove_noise'], 
                 dbscan_eps=cfg['dbscan_eps'], 
@@ -354,7 +411,7 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
-            objects = merge_objects(
+            objects = measure_time(merge_objects)(
                 merge_overlap_thresh=cfg["merge_overlap_thresh"],
                 merge_visual_sim_thresh=cfg["merge_visual_sim_thresh"],
                 merge_text_sim_thresh=cfg["merge_text_sim_thresh"],
@@ -453,6 +510,9 @@ def main(cfg : DictConfig):
                 'class_names': obj_classes.get_classes_arr(),
                 'class_colors': obj_classes.get_class_color_dict_by_index(),
             }, f)
+            
+    tracker = DenoisingTracker()  # Get the singleton instance of DenoisingTracker
+    tracker.generate_report()
 
 if __name__ == "__main__":
     main()

@@ -1,8 +1,16 @@
+# Standard library imports
+import cv2
+import os
+import PyQt5
+
+# Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
+pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
+os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
 
 import gzip
 from pathlib import Path
 import pickle
-import cv2
+# import cv2
 import hydra
 from line_profiler import profile
 import numpy as np

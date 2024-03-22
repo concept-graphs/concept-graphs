@@ -1,7 +1,7 @@
 defaults:
   - base
   - base_mapping
-  - replica
+  - record3d # replica
   - sam
   - classes
   - logging_level
@@ -11,14 +11,22 @@ defaults:
 # hydra:
 #   verbose : true
 
-detections_exp_suffix: exp_s_detections_stride50_yes_bg_44_mr
-stride: 50
-exp_suffix: r_mapping_yes_bg_2
+# detections_exp_suffix: exp_s_detections_stride50_yes_bg_44_mr
+detections_exp_suffix: s_detections_stride50_2
+force_detection: !!bool True
+save_detections: !!bool True
+
+
+
+stride: 100
+exp_suffix: r_mapping_record3d_4
 save_video: !!bool True
 save_objects_all_frames: !!bool True
 # merge_interval: 5
-denoise_interval: 5   
+denoise_interval: 50   
 # log_level: INFO
+downsample_voxel_size: 0.01
+obj_pcd_max_points: 10000
 
 hydra:
   verbose: true

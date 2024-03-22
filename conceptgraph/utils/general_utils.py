@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from omegaconf import OmegaConf
 import torch
@@ -158,6 +159,21 @@ def save_hydra_config(hydra_cfg, exp_out_path, is_detection_config=False):
 def load_saved_hydra_json_config(exp_out_path):
     with open(get_exp_config_save_path(exp_out_path), "r") as f:
         return json.load(f)
+
+
+def prepare_detection_paths(dataset_root, scene_id, detections_exp_suffix, force_detection, output_base_path):
+    """
+    Prepare and return paths needed for detection output, creating directories as needed.
+    """
+    det_exp_path = get_exp_out_path(dataset_root, scene_id, detections_exp_suffix)
+    if force_detection:
+        det_vis_folder_path = get_vis_out_path(det_exp_path)
+        det_detections_folder_path = get_det_out_path(det_exp_path)
+        os.makedirs(det_vis_folder_path, exist_ok=True)
+        os.makedirs(det_detections_folder_path, exist_ok=True)
+        return det_exp_path, det_vis_folder_path, det_detections_folder_path
+    return det_exp_path
+
         
         
 class ObjectClasses:

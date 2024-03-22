@@ -39,7 +39,7 @@ from conceptgraph.utils.vis import OnlineObjectRenderer, save_video_from_frames
 from conceptgraph.utils.ious import (
     mask_subtract_contained
 )
-from conceptgraph.utils.general_utils import ObjectClasses, get_det_out_path, get_exp_out_path, load_saved_hydra_json_config, measure_time, save_hydra_config
+from conceptgraph.utils.general_utils import ObjectClasses, get_det_out_path, get_exp_out_path, load_saved_hydra_json_config, measure_time, save_hydra_config, should_exit_early
 
 from conceptgraph.slam.slam_classes import MapObjectList
 from conceptgraph.slam.utils import (
@@ -124,7 +124,18 @@ def main(cfg : DictConfig):
         obj_all_frames_out_path = exp_out_path / "saved_obj_all_frames" / f"det_{cfg.detections_exp_suffix}"
         os.makedirs(obj_all_frames_out_path, exist_ok=True)
 
+    exit_early_flag = False
+
     for frame_idx in trange(len(dataset)):
+        
+        # Check if we should exit early only if the flag hasn't been set yet
+        if not exit_early_flag and should_exit_early(cfg.exit_early_file):
+            print("Exit early signal detected. Skipping to the final frame...")
+            exit_early_flag = True
+        
+        # If exit early flag is set and we're not at the last frame, skip this iteration
+        if exit_early_flag and frame_idx < len(dataset) - 1:
+            continue
 
         # Read info about current frame from dataset
         # color image

@@ -39,7 +39,7 @@ from conceptgraph.utils.vis import OnlineObjectRenderer, save_video_from_frames
 from conceptgraph.utils.ious import (
     mask_subtract_contained
 )
-from conceptgraph.utils.general_utils import ObjectClasses, get_det_out_path, get_exp_out_path, load_saved_hydra_json_config, measure_time, save_hydra_config
+from conceptgraph.utils.general_utils import ObjectClasses, get_det_out_path, get_exp_out_path, load_saved_hydra_json_config, measure_time, save_hydra_config, should_exit_early
 
 from conceptgraph.slam.slam_classes import MapObjectList
 from conceptgraph.slam.utils import (
@@ -144,18 +144,6 @@ def main(cfg : DictConfig):
         
         # Set the classes for the detection model
         detection_model.set_classes(obj_classes.get_classes_arr())
-        
-    #     if cfg.save_detections:
-    #         # make the folders to save detections 
-    #         det_exp_out_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.detections_exp_suffix)
-    #         det_vis_folder_path = get_vis_out_path(det_exp_out_path)
-    #         det_detections_folder_path = get_det_out_path(det_exp_out_path)
-    #         save_hydra_config(cfg, det_exp_out_path, is_detection_config=True)
-    # else:
-    #     det_exp_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.detections_exp_suffix)
-    #     det_exp_save_folder = get_det_out_path(det_exp_path)
-    #     detections_exp_cfg = load_saved_hydra_json_config(det_exp_path)
-    #     save_hydra_config(detections_exp_cfg, exp_out_path, is_detection_config=True)
 
     
 
@@ -165,8 +153,19 @@ def main(cfg : DictConfig):
     if cfg.save_objects_all_frames:
         obj_all_frames_out_path = exp_out_path / "saved_obj_all_frames" / f"det_{cfg.detections_exp_suffix}"
         os.makedirs(obj_all_frames_out_path, exist_ok=True)
+        
+    exit_early_flag = False
 
     for frame_idx in trange(len(dataset)):
+        
+        # Check if we should exit early only if the flag hasn't been set yet
+        if not exit_early_flag and should_exit_early(cfg.exit_early_file):
+            print("Exit early signal detected. Skipping to the final frame...")
+            exit_early_flag = True
+        
+        # If exit early flag is set and we're not at the last frame, skip this iteration
+        if exit_early_flag and frame_idx < len(dataset) - 1:
+            continue
 
         # Read info about current frame from dataset
         # color image
@@ -485,8 +484,9 @@ def main(cfg : DictConfig):
                 'class_colors': obj_classes.get_class_color_dict_by_index(),
             }, f)
             
-    if cfg.save_video:
-        save_video_detections(det_exp_path)
+    if run_detections:
+        if cfg.save_video:
+            save_video_detections(det_exp_vis_path)
             
     tracker = DenoisingTracker()  # Get the singleton instance of DenoisingTracker
     tracker.generate_report()

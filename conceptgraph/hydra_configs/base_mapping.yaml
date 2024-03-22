@@ -16,6 +16,9 @@ detections_exp_suffix: exp_base_detections_suffix
 # color_file_name: gsa_classes_${gsa_variant}
 
 
+# This json file controls an early exit feature for the mapping scripts. Specifically, it is periodically checked at every iteration of the loops within 'realtime_mapping.py' and 'streamlined_mapping.py'. When the 'exit_early' entry is set to true, these scripts will bypass their normal iterative processing loop and proceed directly to their final frame processing and cleanup phase. This allows for a quick termination of the mapping process, which can be useful in scenarios where immediate results are preferred or when it's necessary to halt processing due to external constraints. To trigger an early exit, manually edit this file by changing the value of 'exit_early' from false to true. The change will take effect at the next loop iteration.
+exit_early_file: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/conceptgraph/hydra_configs/early_exit.json
+
 device: cuda
 
 use_iou: !!bool True

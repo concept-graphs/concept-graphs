@@ -822,8 +822,13 @@ class Record3DDataset(GradSLAMDataset):
         color_paths = natsorted(
             glob.glob(os.path.join(self.input_folder, "rgb", "*.png"))
         )
+        # check if "high_conf_depth" folder exists, if not, use "depth" folder
+        if os.path.exists(os.path.join(self.input_folder, "high_conf_depth")):
+            depth_folder = "high_conf_depth"
+        else:
+            depth_folder = "depth"
         depth_paths = natsorted(
-            glob.glob(os.path.join(self.input_folder, "depth", "*.png"))
+            glob.glob(os.path.join(self.input_folder, depth_folder, "*.png"))
         )
         embedding_paths = None
         if self.load_embeddings:

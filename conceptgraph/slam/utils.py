@@ -584,29 +584,33 @@ def merge_objects(
     spatial_sim_type: str,
     device: str,
 ):
-    if merge_overlap_thresh > 0:
-        # Assuming compute_overlap_matrix requires only `objects` and `downsample_voxel_size`
-        overlap_matrix = compute_overlap_matrix_general(
-            objects_a=objects,
-            objects_b=None,
-            downsample_voxel_size=downsample_voxel_size,
-        )
-        print("Before merging:", len(objects))
-        # Pass all necessary configuration parameters to merge_overlap_objects
-        objects = merge_overlap_objects(
-            merge_overlap_thresh=merge_overlap_thresh,
-            merge_visual_sim_thresh=merge_visual_sim_thresh,
-            merge_text_sim_thresh=merge_text_sim_thresh,
-            objects=objects,
-            overlap_matrix=overlap_matrix,
-            downsample_voxel_size=downsample_voxel_size,
-            dbscan_remove_noise=dbscan_remove_noise,
-            dbscan_eps=dbscan_eps,
-            dbscan_min_points=dbscan_min_points,
-            spatial_sim_type=spatial_sim_type,
-            device=device,
-        )
-        print("After merging:", len(objects))
+    if len(objects) == 0:
+        return objects
+    if merge_overlap_thresh <= 0:
+        return objects
+
+    # Assuming compute_overlap_matrix requires only `objects` and `downsample_voxel_size`
+    overlap_matrix = compute_overlap_matrix_general(
+        objects_a=objects,
+        objects_b=None,
+        downsample_voxel_size=downsample_voxel_size,
+    )
+    print("Before merging:", len(objects))
+    # Pass all necessary configuration parameters to merge_overlap_objects
+    objects = merge_overlap_objects(
+        merge_overlap_thresh=merge_overlap_thresh,
+        merge_visual_sim_thresh=merge_visual_sim_thresh,
+        merge_text_sim_thresh=merge_text_sim_thresh,
+        objects=objects,
+        overlap_matrix=overlap_matrix,
+        downsample_voxel_size=downsample_voxel_size,
+        dbscan_remove_noise=dbscan_remove_noise,
+        dbscan_eps=dbscan_eps,
+        dbscan_min_points=dbscan_min_points,
+        spatial_sim_type=spatial_sim_type,
+        device=device,
+    )
+    print("After merging:", len(objects))
 
     return objects
 

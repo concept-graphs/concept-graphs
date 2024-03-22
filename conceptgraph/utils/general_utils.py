@@ -117,9 +117,10 @@ def cfg_to_dict(input_cfg):
 
     return serializable_cfg
 
-def get_exp_out_path(dataset_root, scene_id, exp_suffix):
+def get_exp_out_path(dataset_root, scene_id, exp_suffix, make_dir=True):
     exp_out_path = Path(dataset_root) / scene_id / "exps" / f"{exp_suffix}"
-    exp_out_path.mkdir(exist_ok=True, parents=True)
+    if make_dir:
+        exp_out_path.mkdir(exist_ok=True, parents=True)
     return exp_out_path
 
 def get_vis_out_path(exp_out_path):
@@ -127,11 +128,20 @@ def get_vis_out_path(exp_out_path):
     vis_folder_path.mkdir(exist_ok=True, parents=True)
     return vis_folder_path
 
-def get_det_out_path(exp_out_path):
+def get_det_out_path(exp_out_path, make_dir=True):
     detections_folder_path = exp_out_path / "detections"
-    detections_folder_path.mkdir(exist_ok=True, parents=True)
+    if make_dir:
+        detections_folder_path.mkdir(exist_ok=True, parents=True)
     return detections_folder_path
 
+def check_run_detections(force_detection, det_exp_path):
+    # first check if det_exp_path directory exists
+    if force_detection:
+        return True
+    if not det_exp_path.exists():
+        return True
+    return False
+    
 
 def measure_time(func):
     def wrapper(*args, **kwargs):

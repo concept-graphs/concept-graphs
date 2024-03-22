@@ -3,8 +3,7 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 '''
 
 # Standard library imports
-# from conceptgraph.utils.logging_metrics import report_metrics
-from conceptgraph.utils.logging_metrics import DenoisingTracker 
+from conceptgraph.utils.logging_metrics import DenoisingTracker
 import cv2
 import os
 import PyQt5
@@ -12,6 +11,7 @@ import PyQt5
 # Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
 pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
 os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
+
 
 import copy
 from conceptgraph.slam.cfslam_pipeline_batch import prepare_objects_save_vis
@@ -97,14 +97,12 @@ def main(cfg : DictConfig):
             gray_map = False,
         )
         frames = []
-
     # output folder for this mapping experiment
     exp_out_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.exp_suffix)
 
     # output folder of the detections experiment to use
     det_exp_path = get_exp_out_path(cfg.dataset_root, cfg.scene_id, cfg.detections_exp_suffix)
-    # the actual folder with the detections from the detections experiment
-    detections_folder = get_det_out_path(det_exp_path)
+    
 
     # we need to make sure to use the same classes as the ones used in the detections
     detections_exp_cfg = load_saved_hydra_json_config(det_exp_path)
@@ -113,6 +111,11 @@ def main(cfg : DictConfig):
         bg_classes=detections_exp_cfg['bg_classes'], 
         skip_bg=detections_exp_cfg['skip_bg']
     )
+    
+    # the actual folder with the detections from the detections experiment
+    det_exp_pkl_path = get_det_out_path(det_exp_path)
+
+    
 
     save_hydra_config(cfg, exp_out_path)
     save_hydra_config(detections_exp_cfg, exp_out_path, is_detection_config=True)
@@ -129,6 +132,7 @@ def main(cfg : DictConfig):
         image_original_pil = Image.open(color_path)
         # color and depth tensors, and camera instrinsics matrix
         color_tensor, depth_tensor, intrinsics, *_ = dataset[frame_idx]
+        
 
         # Covert to numpy and do some sanity checks
         depth_tensor = depth_tensor[..., 0]
@@ -136,14 +140,16 @@ def main(cfg : DictConfig):
         color_np = color_tensor.cpu().numpy() # (H, W, 3)
         image_rgb = (color_np).astype(np.uint8) # (H, W, 3)
         assert image_rgb.max() > 1, "Image is not in range [0, 255]"
+        
+        
 
         # Load image detections for the current frame
-        gobs = None # stands for grounded SAM observations
-        detections_path = detections_folder / (color_path.stem + ".pkl.gz")
+        raw_gobs = None
+        gobs = None # stands for grounded observations
+        detections_path = det_exp_pkl_path / (color_path.stem + ".pkl.gz")
+        # load the detections
         color_path = str(color_path)
         detections_path = str(detections_path)
-
-        raw_gobs = None
         with gzip.open(detections_path, "rb") as f:
             raw_gobs = pickle.load(f)
 
@@ -247,7 +253,7 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
-            objects = denoise_objects(
+            objects = measure_time(denoise_objects)(
                 downsample_voxel_size=cfg['downsample_voxel_size'], 
                 dbscan_remove_noise=cfg['dbscan_remove_noise'], 
                 dbscan_eps=cfg['dbscan_eps'], 
@@ -277,7 +283,7 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
-            objects = merge_objects(
+            objects = measure_time(merge_objects)(
                 merge_overlap_thresh=cfg["merge_overlap_thresh"],
                 merge_visual_sim_thresh=cfg["merge_visual_sim_thresh"],
                 merge_text_sim_thresh=cfg["merge_text_sim_thresh"],
@@ -376,12 +382,9 @@ def main(cfg : DictConfig):
                 'class_names': obj_classes.get_classes_arr(),
                 'class_colors': obj_classes.get_class_color_dict_by_index(),
             }, f)
-
-    
+            
     tracker = DenoisingTracker()  # Get the singleton instance of DenoisingTracker
     tracker.generate_report()
-
-
 
 if __name__ == "__main__":
     main()

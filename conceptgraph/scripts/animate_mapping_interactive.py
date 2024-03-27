@@ -243,6 +243,14 @@ def main(args):
             return
         main.frame_idx = idx
         print("Frame index set to: ", main.frame_idx)
+
+    def go_forward_one_frame(vis):
+        main.frame_idx += 1
+        main.frame_idx = min(main.frame_idx, len(frame_paths)-1)
+        
+    def go_backward_one_frame(vis):
+        main.frame_idx -= 1
+        main.frame_idx = max(main.frame_idx, 0)
     
     vis.register_key_callback(ord("R"), color_mode_rgb)
     vis.register_key_callback(ord("C"), color_mode_class)
@@ -257,6 +265,9 @@ def main(args):
     vis.register_key_callback(ord("K"), toggle_cam)
     vis.register_key_callback(ord("X"), toggle_bbox)
     vis.register_key_callback(ord("N"), go_to_frame_idx)
+    
+    vis.register_key_callback(ord("A"), go_backward_one_frame)
+    vis.register_key_callback(ord("D"), go_forward_one_frame)
 
     vis.register_key_callback(ord("T"), toggle_top)
     vis.register_key_callback(ord("S"), save_vis_capture)

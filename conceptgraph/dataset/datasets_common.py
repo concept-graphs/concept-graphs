@@ -819,9 +819,15 @@ class Record3DDataset(GradSLAMDataset):
         )
 
     def get_filepaths(self):
-        color_paths = natsorted(
-            glob.glob(os.path.join(self.input_folder, "rgb", "*.png"))
-        )
+        # Attempt to find .jpg files in the directory
+        color_paths = None
+        jpg_paths = glob.glob(os.path.join(self.input_folder, "rgb", "*.jpg"))
+        # If .jpg files are found, use them; otherwise, look for .png files
+        if jpg_paths:
+            color_paths = jpg_paths
+        else:
+            color_paths = glob.glob(os.path.join(self.input_folder, "rgb", "*.png"))
+        color_paths = natsorted(color_paths)
         # check if "high_conf_depth" folder exists, if not, use "depth" folder
         if os.path.exists(os.path.join(self.input_folder, "high_conf_depth")):
             depth_folder = "high_conf_depth"

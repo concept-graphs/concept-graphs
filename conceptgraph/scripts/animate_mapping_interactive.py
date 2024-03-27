@@ -69,13 +69,12 @@ def load_frame(path):
         frame = cached_frame
         
     if isinstance(frame, dict):
-        camera_pose = frame["camera_pose"]
+        camera_pose = frame.get("camera_pose")
         objects = MapObjectList()
-        objects.load_serializable(frame["objects"])
-        
-        if frame['bg_objects'] is None:
-            bg_objects = None
-        else:
+        objects.load_serializable(frame.get("objects"))
+
+        bg_objects = None
+        if frame.get('bg_objects') is not None:
             bg_objects = MapObjectList()
             bg_objects.load_serializable(frame["bg_objects"])
     elif isinstance(frame, list):
@@ -87,7 +86,11 @@ def load_frame(path):
         camera_pose = None
     else:
         raise ValueError("Unknown frame type: ", type(frame))
-        
+    print()
+    print("Loaded frame: ", path)
+    print("Number of objects: ", len(objects))
+    print("Frame_idx: ", frame.get("frame_idx"))
+    print("Color_path: ", frame.get("color_path"))
     return camera_pose, objects, bg_objects
 
 def main(args):

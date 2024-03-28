@@ -92,8 +92,9 @@ export CUDA_HOME=/path/to/anaconda3/envs/conceptgraph/
 
 # Finally install conceptgraphs
 cd /path/to/code/
-git clone git@github.com:concept-graphs/concept-graphs.git
+git clone https://github.com/concept-graphs/concept-graphs.git
 cd concept-graphs
+git checkout ali-dev
 pip install -e .
 ```
 

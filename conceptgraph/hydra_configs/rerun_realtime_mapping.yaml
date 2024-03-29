@@ -1,0 +1,62 @@
+defaults:
+  - base
+  - base_mapping
+  - record3d # replica
+  - sam
+  - classes
+  - logging_level
+  - _self_
+  
+
+# hydra:
+#   verbose : true
+
+# detections_exp_suffix: exp_s_detections_stride50_yes_bg_44_mr
+detections_exp_suffix: s_detections_stride1__5 # s_detections_stride10_5 # s_detections_stride10_12 # r_detections_stride1000_2
+force_detection: !!bool False
+save_detections: !!bool True
+
+# obj_min_detections: 1
+
+stride: 10
+exp_suffix: r_mapping_stride10_new4
+save_video: !!bool True
+save_objects_all_frames: !!bool True
+# merge_interval: 5
+# log_level: INFO
+downsample_voxel_size: 0.01
+obj_pcd_max_points: 5000
+
+debug_render: !!bool False
+
+denoise_interval: -1           # Run DBSCAN every k frame. This operation is heavy
+filter_interval: 5            # Filter objects that have too few associations or are too small
+merge_interval: 5             # Merge objects based on geometric and semantic similarity
+run_denoise_final_frame: !!bool True
+run_filter_final_frame: !!bool True
+run_merge_final_frame: !!bool True
+
+dbscan_remove_noise: !!bool True
+dbscan_eps: 0.1
+dbscan_min_points: 10
+
+# Selection criteria of the fused object point cloud
+obj_min_points: 0
+obj_min_detections: 1
+
+# For merge_overlap_objects() function
+# merge_overlap_thresh: 0.7      # -1 means do not perform the merge_overlap_objects()
+# merge_visual_sim_thresh: 0.7   # Merge only if the visual similarity is larger
+# merge_text_sim_thresh: 0.7     # Merge only if the text cosine sim is larger
+
+hydra:
+  verbose: true
+  # mode: MULTIRUN
+  # sweeper:
+  #   params:
+  #     downsample_voxel_size: 0.025, 0.01, 0.001, 0.001
+  #     obj_pcd_max_points: 5000, 10000, 100000, 100000
+  #     run_denoise_final_frame: False, False, False, True
+  #     run_filter_final_frame: False, False, False, True
+  #     run_merge_final_frame: False, False, False, True
+  #     exp_suffix: r_mapping_025_5000, r_mapping_01_10000, r_mapping_001_100000, r_mapping_001_100000

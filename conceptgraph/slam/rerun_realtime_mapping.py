@@ -5,6 +5,7 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 # Standard library imports
 from typing import Mapping
 import uuid
+from conceptgraph.utils.geometry import rotation_matrix_to_quaternion
 from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker
 import cv2
 import os
@@ -42,7 +43,7 @@ from conceptgraph.utils.vis import OnlineObjectRenderer, save_video_from_frames,
 from conceptgraph.utils.ious import (
     mask_subtract_contained
 )
-from conceptgraph.utils.general_utils import ObjectClasses, get_det_out_path, get_exp_out_path, load_saved_detections, load_saved_hydra_json_config, measure_time, save_detection_results, save_hydra_config, save_pointcloud, should_exit_early
+from conceptgraph.utils.general_utils import ObjectClasses, find_existing_image_path, get_det_out_path, get_exp_out_path, load_saved_detections, load_saved_hydra_json_config, measure_time, save_detection_results, save_hydra_config, save_pointcloud, should_exit_early
 
 from conceptgraph.slam.slam_classes import MapObjectList
 from conceptgraph.slam.utils import (
@@ -81,6 +82,8 @@ from ultralytics import SAM
 import supervision as sv
 import open_clip
 
+import rerun as rr
+
 # Disable torch gradient computation
 torch.set_grad_enabled(False)
 
@@ -89,6 +92,8 @@ torch.set_grad_enabled(False)
 # @profile
 def main(cfg : DictConfig):
     tracker = MappingTracker()
+    rr.init("realtime_mapping")
+    rr.spawn()
     
     wandb.init(project="concept-graphs", 
             #    entity="concept-graphs",
@@ -139,11 +144,13 @@ def main(cfg : DictConfig):
     # if we need to do detections
     run_detections = check_run_detections(cfg.force_detection, det_exp_path)
     det_exp_pkl_path = get_det_out_path(det_exp_path)
+    det_exp_vis_path = get_vis_out_path(det_exp_path)
 
     if run_detections:
+        print("\n".join(["Running detections..."] * 10))
         det_exp_path.mkdir(parents=True, exist_ok=True)
 
-        det_exp_vis_path = get_vis_out_path(det_exp_path)
+        
 
         ## Initialize the detection models
         detection_model = measure_time(YOLO)('yolov8l-world.pt')
@@ -157,6 +164,8 @@ def main(cfg : DictConfig):
 
         # Set the classes for the detection model
         detection_model.set_classes(obj_classes.get_classes_arr())
+    else:
+        print("\n".join(["NOT Running detections..."] * 10))
 
     save_hydra_config(cfg, exp_out_path)
     save_hydra_config(detections_exp_cfg, exp_out_path, is_detection_config=True)
@@ -170,6 +179,7 @@ def main(cfg : DictConfig):
     for frame_idx in trange(len(dataset)):
         tracker.curr_frame_idx = frame_idx
         counter+=1
+        rr.set_time_sequence("frame", frame_idx)
 
         # Check if we should exit early only if the flag hasn't been set yet
         if not exit_early_flag and should_exit_early(cfg.exit_early_file):
@@ -186,6 +196,12 @@ def main(cfg : DictConfig):
         image_original_pil = Image.open(color_path)
         # color and depth tensors, and camera instrinsics matrix
         color_tensor, depth_tensor, intrinsics, *_ = dataset[frame_idx]
+        
+        # rr.log(
+        #     "obs/rgb_image_encoded",
+        #     rr.ImageEncoded(path=color_path)
+        # )
+        # cam = rr.Pinhole()
 
         # Covert to numpy and do some sanity checks
         depth_tensor = depth_tensor[..., 0]
@@ -284,6 +300,70 @@ def main(cfg : DictConfig):
 
         # Don't apply any transformation otherwise
         adjusted_pose = unt_pose
+        
+        
+        # Extract intrinsic parameters
+        focal_length = [intrinsics[0, 0].item(), intrinsics[1, 1].item()]  # Assuming fx = fy, else use the average
+        principal_point = [intrinsics[0, 2].item(), intrinsics[1, 2].item()]
+        resolution = [image_rgb.shape[1], image_rgb.shape[0]]  # Width x Height from the RGB image
+        
+        # Initialize and log camera intrinsics
+        cam = rr.Pinhole(
+            resolution=resolution,
+            focal_length=focal_length,
+            principal_point=principal_point
+        )
+        rr.log("world/camera", cam)
+        
+        # Log RGB image
+        rr.log(
+            "world/camera/rgb_image_encoded",
+            rr.ImageEncoded(path=color_path)
+        )
+        
+        # check if vis path is a file that exists
+        base_vis_save_path = det_exp_vis_path / color_path.stem
+        existing_vis_save_path = find_existing_image_path(base_vis_save_path, ['.jpg', '.png'])
+        
+        if existing_vis_save_path:
+            # Log the visualization image
+            rr.log(
+                "world/camera/rgb_image_annotated",
+                rr.ImageEncoded(path=existing_vis_save_path)
+            )
+        
+        
+        # Convert adjusted_pose to translation and quaternion
+        translation = adjusted_pose[:3, 3].tolist()  # Last column
+        rotation_matrix = adjusted_pose[:3, :3]
+        quaternion = rr.Quaternion(xyzw=rotation_matrix_to_quaternion(rotation_matrix))
+        
+        # Log camera pose
+        # rr.log(
+        #     "world/camera/pose",
+        #     rr.Transform3D(translation=translation, rotation=quaternion, from_parent=True)
+        # )
+        
+        rr.log(
+            # "world/camera", rr.Transform3D(translation=translation, rotation=quaternion, from_parent=True)
+            "world/camera", rr.Transform3D(translation=translation, rotation=quaternion, from_parent=False)
+        )
+        
+        # Assuming depth_tensor is already available and in millimeters
+        # Convert depth_tensor from millimeters to meters for rerun (if necessary)
+        # This conversion depends on your data's units; adjust accordingly
+        depth_in_meters = depth_tensor.numpy() #  / 1000.0  # Convert mm to meters if necessary
+
+        # Ensure depth data is in the expected format for rerun (HxW)
+        # depth_in_meters should be a 2D numpy array at this point
+        assert len(depth_in_meters.shape) == 2, "Depth data must be a 2D array"
+
+        # Log the depth image using the previously logged Pinhole camera model
+        # Specify meter parameter based on your depth data's units
+        rr.log(
+            "world/camera/depth",
+            rr.DepthImage(depth_in_meters , meter=0.9999999)  # Use meter=1.0 if depth_in_meters is already in meters
+        )
 
         # resize the observation if needed
         resized_gobs = resize_gobs(raw_gobs, image_rgb)
@@ -349,7 +429,7 @@ def main(cfg : DictConfig):
                 })
             continue 
 
-        ### compute similarities and then merge
+        ## compute similarities and then merge
         spatial_sim = compute_spatial_similarities(
             spatial_sim_type=cfg['spatial_sim_type'], 
             detection_list=detection_list, 
@@ -439,6 +519,69 @@ def main(cfg : DictConfig):
                 spatial_sim_type=cfg["spatial_sim_type"],
                 device=cfg["device"],
             )
+            
+        # Assume 'objects' is your list of objects for the current frame
+        for obj in objects:
+            # tracker.total_object_count
+            # print(f"Line 525, tracker.total_object_count: {tracker.total_object_count}")
+            obj_label = f"{obj['curr_obj_num']}_{obj['class_name']}"
+            # obj['new_counter']
+            # print(f"-------------------------------------------------Line 528, obj['new_counter']: {obj['new_counter']}")
+            # print(f"Line 527, obj['curr_obj_num']: {obj['curr_obj_num']}")
+            # replace whatspace with underscore in the label
+            obj_label = obj_label.replace(" ", "_")
+            # print(f"Line 527, obj_label: {obj_label}")
+            # print(f"Line 530, obj['num_obj_in_class']: {obj['num_obj_in_class']}")
+            # print(f"Line 529, obj['id']: {obj['id']}")
+            # if obj_label in tracker.prev_obj_names:
+            # tracker.prev_obj_names
+            entity_path = f"world/objects/{obj_label}"
+            
+            # Convert points and colors to NumPy arrays
+            positions = np.asarray(obj['pcd'].points)
+            if hasattr(obj['pcd'], 'colors') and len(obj['pcd'].colors) > 0:
+                colors = np.asarray(obj['pcd'].colors) * 255
+                # make them ints
+                colors = colors.astype(np.uint8)
+            else:
+                colors = None
+            
+            # Log point cloud data
+            rr.log(entity_path + "/pcd", rr.Points3D(positions, colors=colors))
+            
+            # Assuming bbox is extracted as before
+            bbox = obj['bbox']
+            centers = [bbox.center]
+            half_sizes = [bbox.extent /2 ]
+            # Convert rotation matrix to quaternion
+            bbox_quaternion = [rotation_matrix_to_quaternion(bbox.R)]
+            
+            rr.log(entity_path + "/bbox", rr.Boxes3D(centers=centers, half_sizes=half_sizes, rotations=bbox_quaternion))
+            
+            # Handle class_id which might be a list or an int
+            class_id = obj['class_id'][0] if isinstance(obj['class_id'], list) else obj['class_id']
+            
+            annotation_color = [int(c * 255) for c in obj['inst_color']]  # Normalize to [0, 255]
+
+            
+            # Log class annotation using AnnotationInfo
+            # rr.log(entity_path + "annotations", rr.AnnotationInfo(id=class_id, label=obj['class_name'], color=annotation_color))
+            # rr.log(entity_path + "/class_name", rr.Text(obj['class_name']))
+            # rr.log(entity_path + "/inst_color", rr.components.Color(obj['inst_color']))
+            
+            # t1 = rr.Points3D(positions, colors=colors)
+            # t2 = rr.Boxes3D(centers=centers, half_sizes=half_sizes, rotations=bbox_quaternion)
+            # t3 = rr.components.Color(obj['inst_color'])
+            
+            # rr.log(
+            #     entity_path,
+            #     rr.Points3D(positions, colors=colors),
+            #     rr.Boxes3D(centers=centers, half_sizes=half_sizes, rotations=bbox_quaternion),
+            #     # rr.components.Color(obj['inst_color'])
+            # )
+            k=1
+
+        
 
         # Save the objects for the current frame, if needed
         if cfg.save_objects_all_frames:

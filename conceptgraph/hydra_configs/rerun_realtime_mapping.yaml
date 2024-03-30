@@ -12,7 +12,7 @@ defaults:
 #   verbose : true
 
 # detections_exp_suffix: exp_s_detections_stride50_yes_bg_44_mr
-detections_exp_suffix: s_detections_stride1__5 # s_detections_stride10_5 # s_detections_stride10_12 # r_detections_stride1000_2
+detections_exp_suffix: s_detections_stride1_4 # s_detections_stride10_5 # s_detections_stride10_12 # r_detections_stride1000_2
 force_detection: !!bool False
 save_detections: !!bool True
 
@@ -28,6 +28,7 @@ downsample_voxel_size: 0.01
 obj_pcd_max_points: 5000
 
 debug_render: !!bool False
+vis_render: !!bool False
 
 denoise_interval: -1           # Run DBSCAN every k frame. This operation is heavy
 filter_interval: 5            # Filter objects that have too few associations or are too small

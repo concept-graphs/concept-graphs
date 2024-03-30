@@ -1,5 +1,6 @@
 from PIL import Image
 
+import numpy as np
 import torch
 
 def transform_points_batch(poses: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
@@ -135,3 +136,28 @@ def check_proj_points(
         proj_behind[proj_within] = proj_z_within > depth_within + depth_margin # (N, )
     
     return proj_xyz, proj_front, proj_align, proj_behind
+
+    
+def rotation_matrix_to_quaternion(R):
+    """
+    Convert a rotation matrix to a quaternion.
+    
+    Parameters:
+    - R: A 3x3 rotation matrix.
+    
+    Returns:
+    - A quaternion in the format [x, y, z, w].
+    """
+    # Make sure the matrix is a numpy array
+    R = np.asarray(R)
+    # Allocate space for the quaternion
+    q = np.empty((4,), dtype=np.float32)
+    # Compute the quaternion components
+    q[3] = np.sqrt(np.maximum(0, 1 + R[0, 0] + R[1, 1] + R[2, 2])) / 2
+    q[0] = np.sqrt(np.maximum(0, 1 + R[0, 0] - R[1, 1] - R[2, 2])) / 2
+    q[1] = np.sqrt(np.maximum(0, 1 - R[0, 0] + R[1, 1] - R[2, 2])) / 2
+    q[2] = np.sqrt(np.maximum(0, 1 - R[0, 0] - R[1, 1] + R[2, 2])) / 2
+    q[0] *= np.sign(q[0] * (R[2, 1] - R[1, 2]))
+    q[1] *= np.sign(q[1] * (R[0, 2] - R[2, 0]))
+    q[2] *= np.sign(q[2] * (R[1, 0] - R[0, 1]))
+    return q

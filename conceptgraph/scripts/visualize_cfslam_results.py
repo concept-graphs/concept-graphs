@@ -1,3 +1,11 @@
+import cv2
+import os
+import PyQt5
+
+# Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
+pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
+os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
+
 import copy
 import json
 import os
@@ -58,6 +66,11 @@ def get_parser():
     return parser
 
 def load_result(result_path):
+    # check if theres a potential symlink for result_path and resolve it
+    potential_path = os.path.realpath(result_path)
+    if potential_path != result_path:
+        print(f"Resolved symlink for result_path: {result_path} -> \n{potential_path}")
+        result_path = potential_path
     with gzip.open(result_path, "rb") as f:
         results = pickle.load(f)
 
@@ -153,7 +166,7 @@ def main(args):
     # Sub-sample the point cloud for better interactive experience
     for i in range(len(objects)):
         pcd = objects[i]['pcd']
-        pcd = pcd.voxel_down_sample(0.05)
+        # pcd = pcd.voxel_down_sample(0.05)
         objects[i]['pcd'] = pcd
     
     pcds = copy.deepcopy(objects.get_values("pcd"))

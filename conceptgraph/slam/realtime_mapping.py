@@ -3,7 +3,9 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 '''
 
 # Standard library imports
-from conceptgraph.utils.logging_metrics import DenoisingTracker
+from typing import Mapping
+import uuid
+from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker
 import cv2
 import os
 import PyQt5
@@ -14,8 +16,7 @@ os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
 
 
 import copy
-from conceptgraph.slam.cfslam_pipeline_batch import prepare_objects_save_vis
-from line_profiler import profile
+# from line_profiler import profile
 import os
 from pathlib import Path
 import gzip
@@ -30,26 +31,32 @@ from open3d.io import read_pinhole_camera_parameters
 import torch
 from tqdm import trange
 
+import wandb
+
 import hydra
 from omegaconf import DictConfig
 
 # Local application/library specific imports
 from conceptgraph.dataset.datasets_common import get_dataset
-from conceptgraph.utils.vis import OnlineObjectRenderer, save_video_from_frames
+from conceptgraph.utils.vis import OnlineObjectRenderer, save_video_from_frames, vis_result_fast_on_depth
 from conceptgraph.utils.ious import (
     mask_subtract_contained
 )
-from conceptgraph.utils.general_utils import ObjectClasses, get_det_out_path, get_exp_out_path, load_saved_hydra_json_config, measure_time, save_hydra_config, should_exit_early
+from conceptgraph.utils.general_utils import ObjectClasses, get_det_out_path, get_exp_out_path, load_saved_detections, load_saved_hydra_json_config, measure_time, save_detection_results, save_hydra_config, save_pointcloud, should_exit_early
 
 from conceptgraph.slam.slam_classes import MapObjectList
 from conceptgraph.slam.utils import (
     filter_gobs,
+    get_bounding_box,
+    init_process_pcd,
     make_detection_list_from_pcd_and_gobs,
     denoise_objects,
     filter_objects,
     merge_objects, 
     detections_to_obj_pcd_and_bbox,
+    prepare_objects_save_vis,
     process_cfg,
+    process_pcd,
     processing_needed,
     resize_gobs,
 )
@@ -79,8 +86,14 @@ torch.set_grad_enabled(False)
 
 # A logger for this file
 @hydra.main(version_base=None, config_path="../hydra_configs/", config_name="realtime_mapping")
-@profile
+# @profile
 def main(cfg : DictConfig):
+    tracker = MappingTracker()
+    
+    wandb.init(project="concept-graphs", 
+            #    entity="concept-graphs",
+                config=cfg_to_dict(cfg),
+               )
     cfg = process_cfg(cfg)
 
     # Initialize the dataset
@@ -122,30 +135,28 @@ def main(cfg : DictConfig):
         bg_classes=detections_exp_cfg['bg_classes'], 
         skip_bg=detections_exp_cfg['skip_bg']
     )
-    
-    # if we need to do detections 
+
+    # if we need to do detections
     run_detections = check_run_detections(cfg.force_detection, det_exp_path)
     det_exp_pkl_path = get_det_out_path(det_exp_path)
-    
+
     if run_detections:
         det_exp_path.mkdir(parents=True, exist_ok=True)
-        
+
         det_exp_vis_path = get_vis_out_path(det_exp_path)
 
         ## Initialize the detection models
         detection_model = measure_time(YOLO)('yolov8l-world.pt')
-        sam_predictor = SAM('mobile_sam.pt') # UltraLytics SAM
+        sam_predictor = SAM('sam_l.pt') # SAM('mobile_sam.pt') # UltraLytics SAM
         # sam_predictor = measure_time(get_sam_predictor)(cfg) # Normal SAM
         clip_model, _, clip_preprocess = open_clip.create_model_and_transforms(
             "ViT-H-14", "laion2b_s32b_b79k"
         )
         clip_model = clip_model.to(cfg.device)
         clip_tokenizer = open_clip.get_tokenizer("ViT-H-14")
-        
+
         # Set the classes for the detection model
         detection_model.set_classes(obj_classes.get_classes_arr())
-
-    
 
     save_hydra_config(cfg, exp_out_path)
     save_hydra_config(detections_exp_cfg, exp_out_path, is_detection_config=True)
@@ -153,16 +164,18 @@ def main(cfg : DictConfig):
     if cfg.save_objects_all_frames:
         obj_all_frames_out_path = exp_out_path / "saved_obj_all_frames" / f"det_{cfg.detections_exp_suffix}"
         os.makedirs(obj_all_frames_out_path, exist_ok=True)
-        
-    exit_early_flag = False
 
+    exit_early_flag = False
+    counter = 0
     for frame_idx in trange(len(dataset)):
-        
+        tracker.curr_frame_idx = frame_idx
+        counter+=1
+
         # Check if we should exit early only if the flag hasn't been set yet
         if not exit_early_flag and should_exit_early(cfg.exit_early_file):
             print("Exit early signal detected. Skipping to the final frame...")
             exit_early_flag = True
-        
+
         # If exit early flag is set and we're not at the last frame, skip this iteration
         if exit_early_flag and frame_idx < len(dataset) - 1:
             continue
@@ -173,7 +186,6 @@ def main(cfg : DictConfig):
         image_original_pil = Image.open(color_path)
         # color and depth tensors, and camera instrinsics matrix
         color_tensor, depth_tensor, intrinsics, *_ = dataset[frame_idx]
-        
 
         # Covert to numpy and do some sanity checks
         depth_tensor = depth_tensor[..., 0]
@@ -181,8 +193,6 @@ def main(cfg : DictConfig):
         color_np = color_tensor.cpu().numpy() # (H, W, 3)
         image_rgb = (color_np).astype(np.uint8) # (H, W, 3)
         assert image_rgb.max() > 1, "Image is not in range [0, 255]"
-        
-        
 
         # Load image detections for the current frame
         raw_gobs = None
@@ -200,14 +210,14 @@ def main(cfg : DictConfig):
             detection_class_ids = results[0].boxes.cls.cpu().numpy().astype(int)
             xyxy_tensor = results[0].boxes.xyxy
             xyxy_np = xyxy_tensor.cpu().numpy()
-            
+
             # Get Masks Using SAM or MobileSAM
             # UltraLytics SAM
             sam_out = sam_predictor.predict(color_path, bboxes=xyxy_tensor, verbose=False)
             masks_tensor = sam_out[0].masks.data
-            
+
             masks_np = masks_tensor.cpu().numpy()
-            
+
             # Create a detections object that we will save later
             curr_det = sv.Detections(
                 xyxy=xyxy_np,
@@ -215,15 +225,18 @@ def main(cfg : DictConfig):
                 class_id=detection_class_ids,
                 mask=masks_np,
             )
-            
-            # Compute and save the clip features of detections  
+
+            # Compute and save the clip features of detections
             image_crops, image_feats, text_feats = compute_clip_features_batched(
                 image_rgb, curr_det, clip_model, clip_preprocess, clip_tokenizer, obj_classes.get_classes_arr(), cfg.device)
 
+            # increment total object detections
+            tracker.increment_total_detections(len(curr_det.xyxy))
 
-            # Save results 
+            # Save results
             # Convert the detections to a dict. The elements are in np.array
             results = {
+                # add new uuid for each detection 
                 "xyxy": curr_det.xyxy,
                 "confidence": curr_det.confidence,
                 "class_id": curr_det.class_id,
@@ -233,26 +246,37 @@ def main(cfg : DictConfig):
                 "image_feats": image_feats,
                 "text_feats": text_feats,
             }
-            
+
             raw_gobs = results
-            
-            # save the detections if needed 
+
+            # save the detections if needed
             if cfg.save_detections:
-                
-                vis_save_path = (det_exp_vis_path / Path(color_path).name).with_suffix(".jpg")
-                #Visualize and save the annotated image
+
+                vis_save_path = (det_exp_vis_path / color_path.name).with_suffix(".jpg")
+                # Visualize and save the annotated image
                 annotated_image, labels = vis_result_fast(image, curr_det, obj_classes.get_classes_arr())
                 cv2.imwrite(str(vis_save_path), annotated_image)
-                curr_detection_name = (vis_save_path.stem + ".pkl.gz")
-                with gzip.open(det_exp_pkl_path / curr_detection_name , "wb") as f:
-                    pickle.dump(results, f)
-                
+
+                depth_image_rgb = cv2.normalize(depth_array, None, 0, 255, cv2.NORM_MINMAX)
+                depth_image_rgb = depth_image_rgb.astype(np.uint8)
+                depth_image_rgb = cv2.cvtColor(depth_image_rgb, cv2.COLOR_GRAY2BGR)
+                annotated_depth_image, labels = vis_result_fast_on_depth(depth_image_rgb, curr_det, obj_classes.get_classes_arr())
+                cv2.imwrite(str(vis_save_path).replace(".jpg", "_depth.jpg"), annotated_depth_image)
+                cv2.imwrite(str(vis_save_path).replace(".jpg", "_depth_only.jpg"), depth_image_rgb)
+                # curr_detection_name = (vis_save_path.stem + ".pkl.gz")
+                # with gzip.open(det_exp_pkl_path / curr_detection_name , "wb") as f:
+                #     pickle.dump(results, f)
+                # /home/kuwajerw/new_local_data/new_record3d/ali_apartment/apt_scan_no_smooth_processed/exps/r_detections_stride1000_2/detections/0
+
+                save_detection_results(det_exp_pkl_path / vis_save_path.stem, results)
         else:
             # load the detections
-            color_path = str(color_path)
-            detections_path = str(detections_path)
-            with gzip.open(detections_path, "rb") as f:
-                raw_gobs = pickle.load(f)
+            # color_path = str(color_path)
+            # detections_path = str(detections_path)
+            # str(det_exp_pkl_path / color_path.stem)
+            raw_gobs = load_saved_detections(det_exp_pkl_path / color_path.stem)
+            # with gzip.open(detections_path, "rb") as f:
+            #     raw_gobs = pickle.load(f)
 
         # get pose, this is the untrasformed pose.
         unt_pose = dataset.poses[frame_idx]
@@ -292,6 +316,20 @@ def main(cfg : DictConfig):
             device=cfg.device,
         )
 
+        for obj in obj_pcds_and_bboxes:
+            if obj:
+                obj["pcd"] = init_process_pcd(
+                    pcd=obj["pcd"],
+                    downsample_voxel_size=cfg["downsample_voxel_size"],
+                    dbscan_remove_noise=cfg["dbscan_remove_noise"],
+                    dbscan_eps=cfg["dbscan_eps"],
+                    dbscan_min_points=cfg["dbscan_min_points"],
+                )
+                obj["bbox"] = get_bounding_box(
+                    spatial_sim_type=cfg['spatial_sim_type'], 
+                    pcd=obj["pcd"],
+                )
+
         detection_list = make_detection_list_from_pcd_and_gobs(
             obj_pcds_and_bboxes, gobs, color_path, obj_classes, frame_idx
         )
@@ -304,6 +342,11 @@ def main(cfg : DictConfig):
         # then continue, no need to match or merge
         if len(objects) == 0:
             objects.extend(detection_list)
+            tracker.increment_total_objects(len(detection_list))
+            wandb.log({
+                    "total_objects_so_far": tracker.get_total_objects(),
+                    "objects_this_frame": len(detection_list),
+                })
             continue 
 
         ### compute similarities and then merge
@@ -346,8 +389,8 @@ def main(cfg : DictConfig):
         is_final_frame = frame_idx == len(dataset) - 1
 
         ### Perform post-processing periodically if told so
-        
-        # Denoising 
+
+        # Denoising
         if processing_needed(
             cfg["denoise_interval"],
             cfg["run_denoise_final_frame"],
@@ -401,17 +444,20 @@ def main(cfg : DictConfig):
         if cfg.save_objects_all_frames:
             # Define the path for saving the current frame's objects
             save_path = obj_all_frames_out_path / f"{frame_idx:06d}.pkl.gz"
-            
+
             # Filter objects based on minimum number of detections and prepare them for saving
             filtered_objects = [obj for obj in objects if obj['num_detections'] >= cfg.obj_min_detections]
             prepared_objects = prepare_objects_save_vis(MapObjectList(filtered_objects))
 
             # Create the result dictionary with camera pose and prepared objects
             result = { "camera_pose": adjusted_pose, "objects": prepared_objects}
+            # also save the current frame_idx, num objects, and color path in results
+            result["frame_idx"] = frame_idx
+            result["num_objects"] = len(filtered_objects)
+            result["color_path"] = str(color_path)
             # Save the result dictionary to a compressed file
             with gzip.open(save_path, 'wb') as f:
                 pickle.dump(result, f)
-
 
         # Render the image with the filtered and colored objects
         if cfg.vis_render:
@@ -438,13 +484,30 @@ def main(cfg : DictConfig):
             )
 
             # If debug mode is enabled, run the visualization
-            if cfg.debug_render:
-                vis.run()
-                del vis  # Delete the visualization handle to free resources
 
             # Convert the rendered image to uint8 format, if it exists
             if rendered_image is not None:
                 rendered_image = (rendered_image * 255).astype(np.uint8)
+
+                # Define text to be added to the image
+                frame_info_text = f"Frame: {frame_idx}, Objects: {len(objects)}, Path: {str(color_path)}"
+
+                # Set the font, size, color, and thickness of the text
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.5
+                color = (255, 0, 0)  # Blue in BGR
+                thickness = 1
+                line_type = cv2.LINE_AA
+
+                # Get text size for positioning
+                text_size, _ = cv2.getTextSize(frame_info_text, font, font_scale, thickness)
+
+                # Set position for the text (bottom-left corner)
+                position = (10, rendered_image.shape[0] - 10)  # 10 pixels from the bottom-left corner
+
+                # Add the text to the image
+                cv2.putText(rendered_image, frame_info_text, position, font, font_scale, color, thickness, line_type)
+
                 frames.append(rendered_image)
 
             if is_final_frame:
@@ -453,26 +516,52 @@ def main(cfg : DictConfig):
                 video_save_path = exp_out_path / (f"s_mapping_{cfg.exp_suffix}.mp4")
                 save_video_from_frames(frames, video_save_path, fps=10)
                 print("Save video to %s" % video_save_path)
-                
-    # LOOP OVER -----------------------------------------------------
 
+        if counter % 10 == 0:
+            # save the pointcloud
+            save_pointcloud(
+                exp_suffix=cfg.exp_suffix,
+                exp_out_path=exp_out_path,
+                cfg=cfg,
+                objects=objects,
+                obj_classes=obj_classes,
+                latest_pcd_filepath=cfg.latest_pcd_filepath,
+                create_symlink=True
+            )
+
+        wandb.log({
+            "frame_idx": frame_idx,
+            "counter": counter,
+            "exit_early_flag": exit_early_flag,
+            "is_final_frame": is_final_frame,
+        })
+
+        tracker.increment_total_objects(len(objects))
+        tracker.increment_total_detections(len(detection_list))
+        wandb.log({
+                "total_objects": tracker.get_total_objects(),
+                "objects_this_frame": len(objects),
+                "total_detections": tracker.get_total_detections(),
+                "detections_this_frame": len(detection_list),
+                "frame_idx": frame_idx,
+                "counter": counter,
+                "exit_early_flag": exit_early_flag,
+                "is_final_frame": is_final_frame,
+                })
+        # print("hey")
+    # LOOP OVER -----------------------------------------------------
 
     # Save the pointcloud
     if cfg.save_pcd:
-        results = {
-            'objects': objects.to_serializable(),
-            'cfg': cfg,
-            'class_names': obj_classes.get_classes_arr(),
-            'class_colors': obj_classes.get_class_color_dict_by_index(),
-        }
-
-        pcd_save_path = exp_out_path / f"pcd_{cfg.exp_suffix}.pkl.gz"
-        # make the directory if it doesn't exist
-        pcd_save_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with gzip.open(str(pcd_save_path), "wb") as f:
-            pickle.dump(results, f)
-        print(f"Saved point cloud to {pcd_save_path}")
+        save_pointcloud(
+            exp_suffix=cfg.exp_suffix,
+            exp_out_path=exp_out_path,
+            cfg=cfg,
+            objects=objects,
+            obj_classes=obj_classes,
+            latest_pcd_filepath=cfg.latest_pcd_filepath,
+            create_symlink=True
+        )
 
     # Save metadata if all frames are saved
     if cfg.save_objects_all_frames:
@@ -483,13 +572,12 @@ def main(cfg : DictConfig):
                 'class_names': obj_classes.get_classes_arr(),
                 'class_colors': obj_classes.get_class_color_dict_by_index(),
             }, f)
-            
+
     if run_detections:
         if cfg.save_video:
-            save_video_detections(det_exp_vis_path)
-            
-    tracker = DenoisingTracker()  # Get the singleton instance of DenoisingTracker
-    tracker.generate_report()
+            save_video_detections(det_exp_path)
+
+    wandb.finish()
 
 if __name__ == "__main__":
     main()

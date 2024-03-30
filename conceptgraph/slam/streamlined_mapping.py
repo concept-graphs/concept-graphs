@@ -14,8 +14,7 @@ os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
 
 
 import copy
-from conceptgraph.slam.cfslam_pipeline_batch import prepare_objects_save_vis
-from line_profiler import profile
+# from line_profiler import profile
 import os
 from pathlib import Path
 import gzip
@@ -49,6 +48,7 @@ from conceptgraph.slam.utils import (
     filter_objects,
     merge_objects, 
     detections_to_obj_pcd_and_bbox,
+    prepare_objects_save_vis,
     process_cfg,
     processing_needed,
     resize_gobs,
@@ -67,7 +67,7 @@ torch.set_grad_enabled(False)
 
 # A logger for this file
 @hydra.main(version_base=None, config_path="../hydra_configs/", config_name="streamlined_mapping")
-@profile
+# @profile
 def main(cfg : DictConfig):
     cfg = process_cfg(cfg)
 

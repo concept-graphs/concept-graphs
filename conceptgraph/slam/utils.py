@@ -4,9 +4,9 @@ import json
 import logging
 from pathlib import Path
 # from conceptgraph.utils.logging_metrics import track_denoising, 
-from conceptgraph.utils.logging_metrics import DenoisingTracker 
+from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker 
 import cv2
-from line_profiler import profile
+# from line_profiler import profile
 
 import numpy as np
 from omegaconf import DictConfig
@@ -24,6 +24,8 @@ from conceptgraph.slam.slam_classes import MapObjectList, DetectionList
 
 from conceptgraph.utils.ious import compute_3d_iou, compute_3d_iou_accurate_batch, compute_iou_batch
 from conceptgraph.dataset.datasets_common import from_intrinsics_matrix
+
+tracker = MappingTracker()
 
 def get_classes_colors(classes):
     class_colors = {}
@@ -65,7 +67,7 @@ def create_or_load_colors(cfg, filename="gsa_classes_tag2text"):
         print("Saved class colors to ", class_colors_fp)
     return classes, class_colors
 
-@profile
+# @profile
 def create_object_pcd(depth_array, mask, cam_K, image, obj_color=None) -> o3d.geometry.PointCloud:
     fx, fy, cx, cy = from_intrinsics_matrix(cam_K)
     
@@ -116,8 +118,9 @@ def create_object_pcd(depth_array, mask, cam_K, image, obj_color=None) -> o3d.ge
     
     return pcd
 
+# @profile
 def pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10) -> o3d.geometry.PointCloud:
-    ### Remove noise via clustering
+    ## Remove noise via clustering
     pcd_clusters = pcd.cluster_dbscan(
         eps=eps,
         min_points=min_points,
@@ -159,12 +162,54 @@ def pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10) ->
         
     return pcd
 
-@profile
-def process_pcd(pcd, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, run_dbscan=True):
+def init_pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10) -> o3d.geometry.PointCloud:
+    ## Remove noise via clustering
+    pcd_clusters = pcd.cluster_dbscan( # inint
+        eps=eps,
+        min_points=min_points,
+    )
+    
+    # Convert to numpy arrays
+    obj_points = np.asarray(pcd.points)
+    obj_colors = np.asarray(pcd.colors)
+    pcd_clusters = np.array(pcd_clusters)
+
+    # Count all labels in the cluster
+    counter = Counter(pcd_clusters)
+
+    # Remove the noise label
+    if counter and (-1 in counter):
+        del counter[-1]
+
+    if counter:
+        # Find the label of the largest cluster
+        most_common_label, _ = counter.most_common(1)[0]
+        
+        # Create mask for points in the largest cluster
+        largest_mask = pcd_clusters == most_common_label
+
+        # Apply mask
+        largest_cluster_points = obj_points[largest_mask]
+        largest_cluster_colors = obj_colors[largest_mask]
+        
+        # If the largest cluster is too small, return the original point cloud
+        if len(largest_cluster_points) < 5:
+            return pcd
+
+        # Create a new PointCloud object
+        largest_cluster_pcd = o3d.geometry.PointCloud()
+        largest_cluster_pcd.points = o3d.utility.Vector3dVector(largest_cluster_points)
+        largest_cluster_pcd.colors = o3d.utility.Vector3dVector(largest_cluster_colors)
+        
+        pcd = largest_cluster_pcd
+        
+    return pcd
+
+def init_process_pcd(pcd, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, run_dbscan=True):
     pcd = pcd.voxel_down_sample(voxel_size=downsample_voxel_size)
     
     if dbscan_remove_noise and run_dbscan:
-        pcd = pcd_denoise_dbscan(
+        pcd = init_pcd_denoise_dbscan(
             pcd, 
             eps=dbscan_eps, 
             min_points=dbscan_min_points
@@ -172,7 +217,21 @@ def process_pcd(pcd, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbs
         
     return pcd
 
-@profile
+# @profile
+def process_pcd(pcd, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, run_dbscan=True):
+    pcd = pcd.voxel_down_sample(voxel_size=downsample_voxel_size)
+    
+    if dbscan_remove_noise and run_dbscan:
+        pass
+        # pcd = pcd_denoise_dbscan(
+        #     pcd, 
+        #     eps=dbscan_eps, 
+        #     min_points=dbscan_min_points
+        # )
+        
+    return pcd
+
+# @profile
 def get_bounding_box(spatial_sim_type, pcd):
     if ("accurate" in spatial_sim_type or "overlap" in spatial_sim_type) and len(pcd.points) >= 4:
         try:
@@ -183,18 +242,22 @@ def get_bounding_box(spatial_sim_type, pcd):
     else:
         return pcd.get_axis_aligned_bounding_box()
 
-# def merge_obj2_into_obj1(obj1, obj2, spatial_sim_type, device, run_dbscan=True):
+# @profile
 def merge_obj2_into_obj1(obj1, obj2, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, spatial_sim_type, device, run_dbscan=True):
 
     '''
     Merge the new object to the old object
     This operation is done in-place
     '''
+    global tracker
+    
+    tracker.track_merge(obj1, obj2)
+    
     n_obj1_det = obj1['num_detections']
     n_obj2_det = obj2['num_detections']
     
     for k in obj1.keys():
-        if k in ['class_name', 'mask', 'id']:
+        if k in ['class_name', 'mask', 'id', 'curr_obj_num','new_counter', 'num_obj_in_class']:
             continue
         if k in ['caption']:
             # Here we need to merge two dictionaries and adjust the key of the second one
@@ -346,7 +409,7 @@ def compute_overlap_matrix_2set(objects_map: MapObjectList, objects_new: Detecti
 
     return overlap_matrix
 
-
+# @profile
 def compute_overlap_matrix_general(objects_a: MapObjectList, objects_b = None, downsample_voxel_size = None) -> np.ndarray:
     """
     Compute the overlap matrix between two sets of objects represented by their point clouds. This function can also perform self-comparison when `objects_b` is not provided. The overlap is quantified based on the proximity of points from one object to the nearest points of another, within a threshold specified by `downsample_voxel_size`.
@@ -445,7 +508,7 @@ def compute_overlap_matrix_general(objects_a: MapObjectList, objects_b = None, d
 
     return overlap_matrix
 
-
+# @profile
 def merge_overlap_objects(
     merge_overlap_thresh: float,
     merge_visual_sim_thresh: float,
@@ -512,7 +575,7 @@ def merge_overlap_objects(
 
     return objects
 
-
+# @profile
 def denoise_objects(
     downsample_voxel_size: float,
     dbscan_remove_noise: bool,
@@ -527,7 +590,7 @@ def denoise_objects(
     for i in range(len(objects)):
         og_object_pcd = objects[i]["pcd"]
         
-        if len(og_object_pcd.points) <= 3000: # no need to denoise
+        if len(og_object_pcd.points) <= 1: # no need to denoise
             objects[i]["pcd"] = og_object_pcd
         else:
             # Adjust the call to process_pcd with explicit parameters
@@ -554,7 +617,7 @@ def denoise_objects(
     logging.debug(f"Finished denoising with {len(objects)} objects")
     return objects
 
-
+# @profile
 def filter_objects(
     obj_min_points: int, obj_min_detections: int, objects: MapObjectList
 ):
@@ -571,7 +634,7 @@ def filter_objects(
 
     return objects
 
-
+# @profile
 def merge_objects(
     merge_overlap_thresh: float,
     merge_visual_sim_thresh: float,
@@ -615,7 +678,7 @@ def merge_objects(
     return objects
 
 
-@profile
+# @profile
 def filter_gobs(
     gobs: dict,
     image: np.ndarray,
@@ -708,119 +771,119 @@ def resize_gobs(gobs, image):
 
     return gobs
 
-@profile
-def gobs_to_detection_list(
-    image, 
-    depth_array,
-    cam_K, 
-    idx, 
-    gobs, 
-    trans_pose = None,
-    class_names = None,
-    BG_CLASSES  = None,
-    color_path = None,
-    min_points_threshold: int = None,
-    spatial_sim_type: str = None,
-    downsample_voxel_size: float = None,  # New parameter
-    dbscan_remove_noise: bool = None,     # New parameter
-    dbscan_eps: float = None,             # New parameter
-    dbscan_min_points: int = None         # New parameter
-):
-    '''
-    Return a DetectionList object from the gobs
-    All object are still in the camera frame. 
-    '''
-    fg_detection_list = DetectionList()
-    bg_detection_list = DetectionList()
+# # @profile
+# def gobs_to_detection_list(
+#     image, 
+#     depth_array,
+#     cam_K, 
+#     idx, 
+#     gobs, 
+#     trans_pose = None,
+#     class_names = None,
+#     BG_CLASSES  = None,
+#     color_path = None,
+#     min_points_threshold: int = None,
+#     spatial_sim_type: str = None,
+#     downsample_voxel_size: float = None,  # New parameter
+#     dbscan_remove_noise: bool = None,     # New parameter
+#     dbscan_eps: float = None,             # New parameter
+#     dbscan_min_points: int = None         # New parameter
+# ):
+#     '''
+#     Return a DetectionList object from the gobs
+#     All object are still in the camera frame. 
+#     '''
+#     fg_detection_list = DetectionList()
+#     bg_detection_list = DetectionList()
     
-    # gobs = resize_gobs(gobs, image)
-    # gobs = filter_gobs(
-    #     gobs, 
-    #     image, 
-    #     skip_bg=skip_bg,
-    #     BG_CLASSES=BG_CLASSES,
-    #     mask_area_threshold=mask_area_threshold,
-    #     max_bbox_area_ratio=max_bbox_area_ratio,
-    #     mask_conf_threshold=mask_conf_threshold,
-    # )
+#     # gobs = resize_gobs(gobs, image)
+#     # gobs = filter_gobs(
+#     #     gobs, 
+#     #     image, 
+#     #     skip_bg=skip_bg,
+#     #     BG_CLASSES=BG_CLASSES,
+#     #     mask_area_threshold=mask_area_threshold,
+#     #     max_bbox_area_ratio=max_bbox_area_ratio,
+#     #     mask_conf_threshold=mask_conf_threshold,
+#     # )
+
+#     if len(gobs['xyxy']) == 0:
+#         return fg_detection_list, bg_detection_list
     
-    if len(gobs['xyxy']) == 0:
-        return fg_detection_list, bg_detection_list
+#     # Compute the containing relationship among all detections and subtract fg from bg objects
+#     xyxy = gobs['xyxy']
+#     mask = gobs['mask']
+#     # gobs['mask'] = mask_subtract_contained(xyxy, mask)
     
-    # Compute the containing relationship among all detections and subtract fg from bg objects
-    xyxy = gobs['xyxy']
-    mask = gobs['mask']
-    # gobs['mask'] = mask_subtract_contained(xyxy, mask)
-    
-    n_masks = len(gobs['xyxy'])
-    for mask_idx in range(n_masks):
-        local_class_id = gobs['class_id'][mask_idx]
-        mask = gobs['mask'][mask_idx]
-        class_name = gobs['classes'][local_class_id]
-        global_class_id = -1 if class_names is None else class_names.index(class_name)
+#     n_masks = len(gobs['xyxy'])
+#     for mask_idx in range(n_masks):
+#         local_class_id = gobs['class_id'][mask_idx]
+#         mask = gobs['mask'][mask_idx]
+#         class_name = gobs['classes'][local_class_id]
+#         global_class_id = -1 if class_names is None else class_names.index(class_name)
         
-        # make the pcd and color it
-        camera_object_pcd = create_object_pcd(
-            depth_array,
-            mask,
-            cam_K,
-            image,
-            obj_color = None
-        )
+#         # make the pcd and color it
+#         camera_object_pcd = create_object_pcd(
+#             depth_array,
+#             mask,
+#             cam_K,
+#             image,
+#             obj_color = None
+#         )
         
-        # It at least contains 5 points
-        if len(camera_object_pcd.points) < max(min_points_threshold, 5): 
-            continue
+#         # It at least contains 5 points
+#         if len(camera_object_pcd.points) < max(min_points_threshold, 5): 
+#             continue
         
-        if trans_pose is not None:
-            global_object_pcd = camera_object_pcd.transform(trans_pose)
-        else:
-            global_object_pcd = camera_object_pcd
+#         if trans_pose is not None:
+#             global_object_pcd = camera_object_pcd.transform(trans_pose)
+#         else:
+#             global_object_pcd = camera_object_pcd
         
-        # get largest cluster, filter out noise 
-        # global_object_pcd = process_pcd(global_object_pcd, cfg)
-        global_object_pcd = process_pcd(global_object_pcd, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, run_dbscan=True)
+#         # get largest cluster, filter out noise 
+#         # global_object_pcd = process_pcd(global_object_pcd, cfg)
+#         global_object_pcd = process_pcd(global_object_pcd, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, run_dbscan=True)
 
         
-        # pcd_bbox = get_bounding_box(cfg, global_object_pcd)
-        pcd_bbox = get_bounding_box(spatial_sim_type, global_object_pcd)
-        pcd_bbox.color = [0,1,0]
+#         # pcd_bbox = get_bounding_box(cfg, global_object_pcd)
+#         pcd_bbox = get_bounding_box(spatial_sim_type, global_object_pcd)
+#         pcd_bbox.color = [0,1,0]
         
-        if pcd_bbox.volume() < 1e-6:
-            continue
+#         if pcd_bbox.volume() < 1e-6:
+#             continue
         
-        # Treat the detection in the same way as a 3D object
-        # Store information that is enough to recover the detection
-        detected_object = {
-            'id' : uuid.uuid4(),
-            'image_idx' : [idx],                             # idx of the image
-            'mask_idx' : [mask_idx],                         # idx of the mask/detection
-            'color_path' : [color_path],                     # path to the RGB image
-            'class_name' : [class_name],                         # global class id for this detection
-            'class_id' : [global_class_id],                         # global class id for this detection
-            'num_detections' : 1,                            # number of detections in this object
-            'mask': [mask],
-            'xyxy': [gobs['xyxy'][mask_idx]],
-            'conf': [gobs['confidence'][mask_idx]],
-            'n_points': [len(global_object_pcd.points)],
-            'pixel_area': [mask.sum()],
-            'contain_number': [None],                          # This will be computed later
-            "inst_color": np.random.rand(3),                 # A random color used for this segment instance
-            'is_background': class_name in BG_CLASSES,
+#         # Treat the detection in the same way as a 3D object
+#         # Store information that is enough to recover the detection
+#         detected_object = {
+#             'id' : uuid.uuid4(),
+#             'image_idx' : [idx],                             # idx of the image
+#             'mask_idx' : [mask_idx],                         # idx of the mask/detection
+#             'color_path' : [color_path],                     # path to the RGB image
+#             'class_name' : [class_name],                         # global class id for this detection
+#             'class_id' : [global_class_id],                         # global class id for this detection
+#             'num_detections' : 1,                            # number of detections in this object
+#             'mask': [mask],
+#             'xyxy': [gobs['xyxy'][mask_idx]],
+#             'conf': [gobs['confidence'][mask_idx]],
+#             'n_points': [len(global_object_pcd.points)],
+#             'pixel_area': [mask.sum()],
+#             'contain_number': [None],                          # This will be computed later
+#             "inst_color": np.random.rand(3),                 # A random color used for this segment instance
+#             'is_background': class_name in BG_CLASSES,
             
-            # These are for the entire 3D object
-            'pcd': global_object_pcd,
-            'bbox': pcd_bbox,
-            'clip_ft': to_tensor(gobs['image_feats'][mask_idx]),
-            'text_ft': to_tensor(gobs['text_feats'][mask_idx]),
-        }
+#             # These are for the entire 3D object
+#             'pcd': global_object_pcd,
+#             'bbox': pcd_bbox,
+#             'clip_ft': to_tensor(gobs['image_feats'][mask_idx]),
+#             'text_ft': to_tensor(gobs['text_feats'][mask_idx]),
+#         }
         
-        if class_name in BG_CLASSES:
-            bg_detection_list.append(detected_object)
-        else:
-            fg_detection_list.append(detected_object)
+#         if class_name in BG_CLASSES:
+#             bg_detection_list.append(detected_object)
+#         else:
+#             fg_detection_list.append(detected_object)
     
-    return fg_detection_list, bg_detection_list
+#     return fg_detection_list, bg_detection_list
 
 def transform_detection_list(
     detection_list: DetectionList,
@@ -850,7 +913,7 @@ def transform_detection_list(
 
     return detection_list
 
-
+# @profile
 def make_detection_list_from_pcd_and_gobs(
     obj_pcds_and_bboxes, gobs, color_path, obj_classes, image_idx
 ):
@@ -858,6 +921,7 @@ def make_detection_list_from_pcd_and_gobs(
     This function makes a detection list for the objects
     Ideally I don't want it to be needed, the detection list has too much info and is inefficient
     '''
+    global tracker
     detection_list = DetectionList()
     # bg_detection_list = DetectionList()
     for mask_idx in range(len(gobs['mask'])):
@@ -869,9 +933,17 @@ def make_detection_list_from_pcd_and_gobs(
         
         is_bg_object = bool(curr_class_name in obj_classes.get_bg_classes_arr())
         
+        tracker.curr_class_count[curr_class_name] += 1
+        tracker.total_object_count += 1
+        # print(f"Line 937, tracker.total_object_count INCREMENTED: {tracker.total_object_count }")
+        num_obj_in_class = tracker.curr_class_count[curr_class_name]
+        
+        tracker.brand_new_counter += 1
+        
         detected_object = {
             'id' : uuid.uuid4(),
             'image_idx' : [image_idx],                             # idx of the image
+            
             'mask_idx' : [mask_idx],                         # idx of the mask/detection
             'color_path' : [color_path],                     # path to the RGB image
             'class_name' : curr_class_name,                         # global class id for this detection
@@ -891,7 +963,14 @@ def make_detection_list_from_pcd_and_gobs(
             'bbox': obj_pcds_and_bboxes[mask_idx]['bbox'],
             'clip_ft': to_tensor(gobs['image_feats'][mask_idx]),
             'text_ft': to_tensor(gobs['text_feats'][mask_idx]),
+            'num_obj_in_class': num_obj_in_class,
+            'curr_obj_num': tracker.total_object_count,
+            'new_counter' : tracker.brand_new_counter,
         }
+        # detected_object['curr_obj_num']
+        # print(f"Line 969, detected_object['image_idx']: {detected_object['image_idx']}")
+        # print(f"Line 971, detected_object['class_name']: {detected_object['class_name']}")
+        # print(f"Line 966, detected_object['curr_obj_num']: {detected_object['curr_obj_num']}")
         
         # if is_bg_object:
         #     bg_detection_list.append(detected_object)
@@ -900,7 +979,7 @@ def make_detection_list_from_pcd_and_gobs(
     
     return detection_list # , bg_detection_list
 
-
+# @profile
 def dynamic_downsample(points, colors=None, target=5000):
     """
     Simplified and configurable downsampling function that dynamically adjusts the 
@@ -1000,6 +1079,11 @@ def detections_to_obj_pcd_and_bbox(
     min_points_threshold=5, 
     spatial_sim_type='axis_aligned', 
     obj_pcd_max_points = None,
+    downsample_voxel_size = None,
+    dbscan_remove_noise = None,
+    dbscan_eps = None,
+    dbscan_min_points = None,
+    run_dbscan = None,
     device='cuda'
 ):
     """
@@ -1114,3 +1198,20 @@ def process_cfg(cfg: DictConfig):
             "For multiscan dataset, image height and width must be specified"
 
     return cfg
+
+def prepare_objects_save_vis(objects: MapObjectList, downsample_size: float=0.025):
+    objects_to_save = copy.deepcopy(objects)
+            
+    # Downsample the point cloud
+    for i in range(len(objects_to_save)):
+        objects_to_save[i]['pcd'] = objects_to_save[i]['pcd'].voxel_down_sample(downsample_size)
+
+    # Remove unnecessary keys
+    for i in range(len(objects_to_save)):
+        for k in list(objects_to_save[i].keys()):
+            if k not in [
+                'pcd', 'bbox', 'clip_ft', 'text_ft', 'class_id', 'num_detections', 'inst_color'
+            ]:
+                del objects_to_save[i][k]
+                
+    return objects_to_save.to_serializable()

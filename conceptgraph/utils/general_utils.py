@@ -1,6 +1,9 @@
+import gzip
 import json
+import logging
 import os
 from pathlib import Path
+import pickle
 from omegaconf import OmegaConf
 import torch
 import numpy as np
@@ -184,6 +187,67 @@ def prepare_detection_paths(dataset_root, scene_id, detections_exp_suffix, force
         return det_exp_path, det_vis_folder_path, det_detections_folder_path
     return det_exp_path
 
+def should_exit_early(file_path):
+    try:
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+        
+        # Check if we should exit early
+        if data.get("exit_early", False):
+            # Reset the exit_early flag to False
+            data["exit_early"] = False
+            # Write the updated data back to the file
+            with open(file_path, 'w') as file:
+                json.dump(data, file)
+            return True
+        else:
+            return False
+    except Exception as e:
+        # If there's an error reading the file or the key doesn't exist, 
+        # log the error and return False
+        print(f"Error reading {file_path}: {e}")
+        logging.info(f"Error reading {file_path}: {e}")
+        return False
+
+def save_detection_results(base_path, results):
+    base_path.mkdir(exist_ok=True, parents=True)
+    for key, value in results.items():
+        save_path = Path(base_path) / f"{key}"
+        if isinstance(value, np.ndarray):
+            # Save NumPy arrays using .npz for efficient storage
+            np.savez_compressed(f"{save_path}.npz", value)
+        else:
+            # For other types, fall back to pickle
+            with gzip.open(f"{save_path}.pkl.gz", "wb") as f:
+                pickle.dump(value, f)
+                
+def load_saved_detections(base_path):
+    base_path = Path(base_path)
+    
+    # Construct potential .pkl.gz file path based on the base_path
+    potential_pkl_gz_path = Path(str(base_path) + '.pkl.gz')
+
+    # Check if the constructed .pkl.gz file exists
+    # This is the old wat 
+    if potential_pkl_gz_path.exists() and potential_pkl_gz_path.is_file():
+        # The path points directly to a .pkl.gz file
+        with gzip.open(potential_pkl_gz_path, "rb") as f:
+            return pickle.load(f)
+    elif base_path.is_dir():
+        loaded_detections = {}
+        for file_path in base_path.iterdir():
+            # Handle files based on their extension, adjusting the key extraction method
+            if file_path.suffix == '.npz':
+                key = file_path.name.replace('.npz', '')
+                with np.load(file_path, allow_pickle=True) as data:
+                    loaded_detections[key] = data['arr_0']
+            elif file_path.suffix == '.gz' and file_path.suffixes[-2] == '.pkl':
+                key = file_path.name.replace('.pkl.gz', '')
+                with gzip.open(file_path, "rb") as f:
+                    loaded_detections[key] = pickle.load(f)
+        return loaded_detections
+    else:
+        raise FileNotFoundError(f"No valid file or directory found at {base_path}")
         
         
 class ObjectClasses:
@@ -270,3 +334,63 @@ class ObjectClasses:
         Returns a dictionary of class colors, just like self.class_to_color, but indexed by class index.
         """
         return {str(i): self.get_class_color(i) for i in range(len(self.classes))}
+
+
+def save_pointcloud(exp_suffix, exp_out_path, cfg, objects, obj_classes, latest_pcd_filepath=None, create_symlink=True):
+    """
+    Saves the point cloud data to a .pkl.gz file. Optionally, creates or updates a symlink to the latest saved file.
+
+    Args:
+    - exp_suffix (str): Suffix for the experiment, used in naming the saved file.
+    - exp_out_path (Path or str): Output path for the experiment's saved files.
+    - objects: The objects to save, assumed to have a `to_serializable()` method.
+    - obj_classes: The object classes, assumed to have `get_classes_arr()` and `get_class_color_dict_by_index()` methods.
+    - latest_pcd_filepath (Path or str, optional): Path for the symlink to the latest point cloud save. Default is None.
+    - create_symlink (bool): Whether to create/update a symlink to the latest save. Default is True.
+    """
+    # Prepare the results dictionary
+    results = {
+        'objects': objects.to_serializable(),
+        'cfg': cfg_to_dict(cfg),
+        'class_names': obj_classes.get_classes_arr(),
+        'class_colors': obj_classes.get_class_color_dict_by_index(),
+    }
+
+    # Define the save path for the point cloud
+    pcd_save_path = Path(exp_out_path) / f"pcd_{exp_suffix}.pkl.gz"
+    # Make the directory if it doesn't exist
+    pcd_save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save the point cloud data
+    with gzip.open(pcd_save_path, "wb") as f:
+        pickle.dump(results, f)
+    print(f"Saved point cloud to {pcd_save_path}")
+
+    # Create or update the symlink if requested
+    if create_symlink and latest_pcd_filepath:
+        latest_pcd_path = Path(latest_pcd_filepath)
+        # Remove the existing symlink if it exists
+        if latest_pcd_path.is_symlink() or latest_pcd_path.exists():
+            latest_pcd_path.unlink()
+        # Create a new symlink pointing to the latest point cloud save
+        latest_pcd_path.symlink_to(pcd_save_path)
+        print(f"Updated symlink to point to the latest point cloud save at {latest_pcd_path} to:\n{pcd_save_path}")
+
+        
+def find_existing_image_path(base_path, extensions):
+    """
+    Checks for the existence of a file with the given base path and any of the provided extensions.
+    Returns the path of the first existing file found or None if no file is found.
+
+    Parameters:
+    - base_path: The base file path without the extension.
+    - extensions: A list of file extensions to check for.
+
+    Returns:
+    - Path of the existing file or None if no file exists.
+    """
+    for ext in extensions:
+        potential_path = base_path.with_suffix(ext)
+        if potential_path.exists():
+            return potential_path
+    return None

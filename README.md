@@ -319,6 +319,15 @@ And then we can type `cabinet` and press enter, and the point cloud will be colo
 
 That's all for now, we will keep updating this README with more information as we go.
 
+## Troubleshooting
+
+Sometimes for X11 or Qt related errors, I had to put this in my bashrc file to fix it 
+    
+```bash
+export XKB_CONFIG_ROOT=/usr/share/X11/xkb
+```
+
+
 
 # OLD README FOR CONCEPTGRAPHS BELOW 
 

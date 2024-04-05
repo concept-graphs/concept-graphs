@@ -257,7 +257,7 @@ def merge_obj2_into_obj1(obj1, obj2, downsample_voxel_size, dbscan_remove_noise,
     n_obj2_det = obj2['num_detections']
     
     for k in obj1.keys():
-        if k in ['class_name', 'mask', 'id', 'curr_obj_num','new_counter', 'num_obj_in_class']:
+        if k in ['class_name', 'id', 'curr_obj_num','new_counter', 'num_obj_in_class']:
             continue
         if k in ['caption']:
             # Here we need to merge two dictionaries and adjust the key of the second one

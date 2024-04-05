@@ -265,11 +265,19 @@ def extract_node_captions(args):
     #     preprocess_and_encode_pil_image,
     # )
 
-    # Load class names from the json file
+    # Load class names from the json or text file
+    # otherwise raise an error
     class_names = None
     with open(Path(args.class_names_file), "r") as f:
-        class_names = [cls.strip() for cls in f.readlines()]
-    print(class_names)
+
+        if Path(args.class_names_file).suffix == ".json":
+            class_names = json.load(f)
+        elif Path(args.class_names_file).suffix == ".txt":
+            class_names = [cls.strip() for cls in f.readlines()]
+        else:
+            raise ValueError("Class names file must be either a json or text file")
+        
+    print(f"Line 280, class_names: {class_names}")
 
     # Creating a namespace object to pass args to the LLaVA chat object
     chat_args = SimpleNamespace()

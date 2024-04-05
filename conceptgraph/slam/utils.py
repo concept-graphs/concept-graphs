@@ -949,7 +949,7 @@ def make_detection_list_from_pcd_and_gobs(
             'class_name' : curr_class_name,                         # global class id for this detection
             'class_id' : [curr_class_idx],                         # global class id for this detection
             'num_detections' : 1,                            # number of detections in this object
-            'mask': gobs['mask'][mask_idx],
+            'mask': [gobs['mask'][mask_idx]],
             'xyxy': [gobs['xyxy'][mask_idx]],
             'conf': [gobs['confidence'][mask_idx]],
             'n_points': len(obj_pcds_and_bboxes[mask_idx]['pcd'].points),

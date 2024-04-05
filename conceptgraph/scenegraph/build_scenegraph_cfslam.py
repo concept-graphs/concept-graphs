@@ -268,7 +268,7 @@ def extract_node_captions(args):
     # Load class names from the json file
     class_names = None
     with open(Path(args.class_names_file), "r") as f:
-        class_names = json.load(f)
+        class_names = [cls.strip() for cls in f.readlines()]
     print(class_names)
 
     # Creating a namespace object to pass args to the LLaVA chat object

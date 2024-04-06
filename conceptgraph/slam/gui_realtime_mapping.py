@@ -5,6 +5,7 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 # Standard library imports
 from typing import Mapping
 import uuid
+from conceptgraph.utils.custom_wandb import OptionalWandB
 from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker
 import cv2
 import os
@@ -30,8 +31,6 @@ import numpy as np
 from open3d.io import read_pinhole_camera_parameters
 import torch
 from tqdm import trange
-
-import wandb
 
 import hydra
 from omegaconf import DictConfig
@@ -95,7 +94,9 @@ CLOUD_NAME = "points"
 def main(cfg : DictConfig):
     tracker = MappingTracker()
     
-    wandb.init(project="concept-graphs", 
+    optional_wandb = OptionalWandB()
+    optional_wandb.set_use_wandb(cfg.use_wandb)
+    optional_wandb.init(project="concept-graphs", 
             #    entity="concept-graphs",
                 config=cfg_to_dict(cfg),
                )
@@ -183,6 +184,7 @@ def main(cfg : DictConfig):
     
     MultiWinApp(
         cfg=cfg, 
+        optional_wandb=optional_wandb,
         dataset=dataset, 
         objects=objects,
         exp_out_path=exp_out_path,
@@ -209,6 +211,7 @@ class MultiWinApp:
     def __init__(
         self,
         cfg,
+        optional_wandb,
         dataset,
         objects,
         exp_out_path,
@@ -240,6 +243,7 @@ class MultiWinApp:
         self.prev_bbox_names = []
 
         self.cfg = cfg
+        self.optional_wandb = optional_wandb
         self.dataset = dataset
         self.objects = objects
         self.exp_out_path = exp_out_path
@@ -575,7 +579,7 @@ class MultiWinApp:
             if len(self.objects) == 0:
                 self.objects.extend(detection_list)
                 self.tracker.increment_total_objects(len(detection_list))
-                wandb.log({
+                self.optional_wandb.log({
                         "total_objects_so_far": self.tracker.get_total_objects(),
                         "objects_this_frame": len(detection_list),
                     })
@@ -762,7 +766,7 @@ class MultiWinApp:
                     create_symlink=True
                 )
 
-            wandb.log({
+            self.optional_wandb.log({
                 "frame_idx": self.frame_idx,
                 "counter": self.counter,
                 "exit_early_flag": self.exit_early_flag,
@@ -771,7 +775,7 @@ class MultiWinApp:
 
             self.tracker.increment_total_objects(len(self.objects))
             self.tracker.increment_total_detections(len(detection_list))
-            wandb.log({
+            self.optional_wandb.log({
                     "total_objects": self.tracker.get_total_objects(),
                     "objects_this_frame": len(self.objects),
                     "total_detections": self.tracker.get_total_detections(),
@@ -924,7 +928,7 @@ class MultiWinApp:
             if self.cfg.save_video:
                 save_video_detections(self.det_exp_path)
             
-        wandb.finish()
+        self.optional_wandb.finish()
         return True  # False would cancel the close
 
 

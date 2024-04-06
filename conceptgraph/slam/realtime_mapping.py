@@ -31,7 +31,7 @@ from open3d.io import read_pinhole_camera_parameters
 import torch
 from tqdm import trange
 
-import wandb
+from conceptgraph.utils.custom_wandb import OptionalWandB
 
 import hydra
 from omegaconf import DictConfig
@@ -90,7 +90,9 @@ torch.set_grad_enabled(False)
 def main(cfg : DictConfig):
     tracker = MappingTracker()
     
-    wandb.init(project="concept-graphs", 
+    optional_wandb = OptionalWandB()
+    optional_wandb.set_use_wandb(cfg.use_wandb)
+    optional_wandb.init(project="concept-graphs", 
             #    entity="concept-graphs",
                 config=cfg_to_dict(cfg),
                )
@@ -343,7 +345,7 @@ def main(cfg : DictConfig):
         if len(objects) == 0:
             objects.extend(detection_list)
             tracker.increment_total_objects(len(detection_list))
-            wandb.log({
+            optional_wandb.log({
                     "total_objects_so_far": tracker.get_total_objects(),
                     "objects_this_frame": len(detection_list),
                 })
@@ -529,7 +531,7 @@ def main(cfg : DictConfig):
                 create_symlink=True
             )
 
-        wandb.log({
+        optional_wandb.log({
             "frame_idx": frame_idx,
             "counter": counter,
             "exit_early_flag": exit_early_flag,
@@ -538,7 +540,7 @@ def main(cfg : DictConfig):
 
         tracker.increment_total_objects(len(objects))
         tracker.increment_total_detections(len(detection_list))
-        wandb.log({
+        optional_wandb.log({
                 "total_objects": tracker.get_total_objects(),
                 "objects_this_frame": len(objects),
                 "total_detections": tracker.get_total_detections(),
@@ -577,7 +579,7 @@ def main(cfg : DictConfig):
         if cfg.save_video:
             save_video_detections(det_exp_path)
 
-    wandb.finish()
+    optional_wandb.finish()
 
 if __name__ == "__main__":
     main()

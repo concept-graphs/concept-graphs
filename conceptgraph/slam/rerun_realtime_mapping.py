@@ -5,6 +5,7 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 # Standard library imports
 from typing import Mapping
 import uuid
+from conceptgraph.utils.custom_wandb import OptionalWandB
 from conceptgraph.utils.geometry import rotation_matrix_to_quaternion
 from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker
 import cv2
@@ -31,8 +32,6 @@ import numpy as np
 from open3d.io import read_pinhole_camera_parameters
 import torch
 from tqdm import trange
-
-import wandb
 
 import hydra
 from omegaconf import DictConfig
@@ -95,7 +94,9 @@ def main(cfg : DictConfig):
     rr.init("realtime_mapping")
     rr.spawn()
     
-    wandb.init(project="concept-graphs", 
+    optional_wandb = OptionalWandB()
+    optional_wandb.set_use_wandb(cfg.use_wandb)
+    optional_wandb.init(project="concept-graphs", 
             #    entity="concept-graphs",
                 config=cfg_to_dict(cfg),
                )
@@ -423,7 +424,7 @@ def main(cfg : DictConfig):
         if len(objects) == 0:
             objects.extend(detection_list)
             tracker.increment_total_objects(len(detection_list))
-            wandb.log({
+            optional_wandb.log({
                     "total_objects_so_far": tracker.get_total_objects(),
                     "objects_this_frame": len(detection_list),
                 })
@@ -672,7 +673,7 @@ def main(cfg : DictConfig):
                 create_symlink=True
             )
 
-        wandb.log({
+        optional_wandb.log({
             "frame_idx": frame_idx,
             "counter": counter,
             "exit_early_flag": exit_early_flag,
@@ -681,7 +682,7 @@ def main(cfg : DictConfig):
 
         tracker.increment_total_objects(len(objects))
         tracker.increment_total_detections(len(detection_list))
-        wandb.log({
+        optional_wandb.log({
                 "total_objects": tracker.get_total_objects(),
                 "objects_this_frame": len(objects),
                 "total_detections": tracker.get_total_detections(),
@@ -720,7 +721,7 @@ def main(cfg : DictConfig):
         if cfg.save_video:
             save_video_detections(det_exp_path)
 
-    wandb.finish()
+    optional_wandb.finish()
 
 if __name__ == "__main__":
     main()

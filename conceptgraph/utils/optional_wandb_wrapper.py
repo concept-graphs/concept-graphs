@@ -36,32 +36,32 @@ class OptionalWandB:
 
     # In your main script, instantiate the OptionalWandB singleton and
     # set whether to use wandb based on your project configuration
-    optional_wandb = OptionalWandB()
-    optional_wandb.set_use_wandb(cfg.use_wandb)
+    owandb = OptionalWandB()
+    owandb.set_use_wandb(cfg.use_wandb)
 
-    # The rest of your code can use optional_wandb as if it was the wandb library
-    optional_wandb.init(project="my_project", config=my_config)
-    optional_wandb.log({"metric": value})
-    optional_wandb.finish()
+    # The rest of your code can use owandb as if it was the wandb library
+    owandb.init(project="my_project", config=my_config)
+    owandb.log({"metric": value})
+    owandb.finish()
     ```
     
     ```python
-    # As with normal wandb, you may want to use the optional_wandb in another script as well
+    # As with normal wandb, you may want to use the owandb in another script as well
     # for example in a utils.py file, and there you'll want to do the import
     # but also initialize the singleton instance of OptionalWandB at the start of the file
     # here you don't need to set the use_wandb flag, as it will be set in the main script
     from custom_wandb import OptionalWandB
-    optional_wandb = OptionalWandB()
+    owandb = OptionalWandB()
     
-    # Then you can use the optional_wandb instance in your functions
+    # Then you can use the owandb instance in your functions
     # As you normally would with wandb
     def do_something():
         value = 42
-        optional_wandb.log({"metric": value})
+        owandb.log({"metric": value})
     ```
 
     In the above example, if `cfg.use_wandb` is True and the wandb library is installed, 
-    `optional_wandb` will forward calls to the wandb library. If wandb is not installed or 
+    `owandb` will forward calls to the wandb library. If wandb is not installed or 
     `cfg.use_wandb` is False, these method calls will do nothing but can still be included 
     in your code without causing errors.
 

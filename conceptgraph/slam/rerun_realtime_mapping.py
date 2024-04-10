@@ -5,7 +5,8 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 # Standard library imports
 from typing import Mapping
 import uuid
-from conceptgraph.utils.custom_wandb import OptionalWandB
+from conceptgraph.utils.optional_rerun_wrapper import OptionalReRun
+from conceptgraph.utils.optional_wandb_wrapper import OptionalWandB
 from conceptgraph.utils.geometry import rotation_matrix_to_quaternion
 from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker
 import cv2
@@ -91,12 +92,17 @@ torch.set_grad_enabled(False)
 # @profile
 def main(cfg : DictConfig):
     tracker = MappingTracker()
-    rr.init("realtime_mapping")
-    rr.spawn()
     
-    optional_wandb = OptionalWandB()
-    optional_wandb.set_use_wandb(cfg.use_wandb)
-    optional_wandb.init(project="concept-graphs", 
+    orr = OptionalReRun()
+    orr.set_use_rerun(cfg.use_rerun)
+    
+    orr.init("realtime_mapping")
+    orr.spawn()
+    
+    owandb = OptionalWandB()
+    owandb.set_use_wandb(cfg.use_wandb)
+
+    owandb.init(project="concept-graphs", 
             #    entity="concept-graphs",
                 config=cfg_to_dict(cfg),
                )
@@ -180,7 +186,7 @@ def main(cfg : DictConfig):
     for frame_idx in trange(len(dataset)):
         tracker.curr_frame_idx = frame_idx
         counter+=1
-        rr.set_time_sequence("frame", frame_idx)
+        orr.set_time_sequence("frame", frame_idx)
 
         # Check if we should exit early only if the flag hasn't been set yet
         if not exit_early_flag and should_exit_early(cfg.exit_early_file):
@@ -198,11 +204,6 @@ def main(cfg : DictConfig):
         # color and depth tensors, and camera instrinsics matrix
         color_tensor, depth_tensor, intrinsics, *_ = dataset[frame_idx]
         
-        # rr.log(
-        #     "obs/rgb_image_encoded",
-        #     rr.ImageEncoded(path=color_path)
-        # )
-        # cam = rr.Pinhole()
 
         # Covert to numpy and do some sanity checks
         depth_tensor = depth_tensor[..., 0]
@@ -309,17 +310,19 @@ def main(cfg : DictConfig):
         resolution = [image_rgb.shape[1], image_rgb.shape[0]]  # Width x Height from the RGB image
         
         # Initialize and log camera intrinsics
-        cam = rr.Pinhole(
-            resolution=resolution,
-            focal_length=focal_length,
-            principal_point=principal_point
+        orr.log(
+            "world/camera",
+            orr.Pinhole(
+                resolution=resolution,
+                focal_length=focal_length,
+                principal_point=principal_point,
+            ),
         )
-        rr.log("world/camera", cam)
-        
+
         # Log RGB image
-        rr.log(
+        orr.log(
             "world/camera/rgb_image_encoded",
-            rr.ImageEncoded(path=color_path)
+            orr.ImageEncoded(path=color_path)
         )
         
         # check if vis path is a file that exists
@@ -328,28 +331,20 @@ def main(cfg : DictConfig):
         
         if existing_vis_save_path:
             # Log the visualization image
-            rr.log(
+            orr.log(
                 "world/camera/rgb_image_annotated",
-                rr.ImageEncoded(path=existing_vis_save_path)
+                orr.ImageEncoded(path=existing_vis_save_path)
             )
         
         
         # Convert adjusted_pose to translation and quaternion
         translation = adjusted_pose[:3, 3].tolist()  # Last column
         rotation_matrix = adjusted_pose[:3, :3]
-        quaternion = rr.Quaternion(xyzw=rotation_matrix_to_quaternion(rotation_matrix))
-        
-        # Log camera pose
-        # rr.log(
-        #     "world/camera/pose",
-        #     rr.Transform3D(translation=translation, rotation=quaternion, from_parent=True)
-        # )
-        
-        rr.log(
-            # "world/camera", rr.Transform3D(translation=translation, rotation=quaternion, from_parent=True)
-            "world/camera", rr.Transform3D(translation=translation, rotation=quaternion, from_parent=False)
+        quaternion = orr.Quaternion(xyzw=rotation_matrix_to_quaternion(rotation_matrix))
+        orr.log(
+            "world/camera", orr.Transform3D(translation=translation, rotation=quaternion, from_parent=False)
         )
-        
+
         # Assuming depth_tensor is already available and in millimeters
         # Convert depth_tensor from millimeters to meters for rerun (if necessary)
         # This conversion depends on your data's units; adjust accordingly
@@ -361,9 +356,9 @@ def main(cfg : DictConfig):
 
         # Log the depth image using the previously logged Pinhole camera model
         # Specify meter parameter based on your depth data's units
-        rr.log(
+        orr.log(
             "world/camera/depth",
-            rr.DepthImage(depth_in_meters , meter=0.9999999)  # Use meter=1.0 if depth_in_meters is already in meters
+            orr.DepthImage(depth_in_meters , meter=0.9999999)  # Use meter=1.0 if depth_in_meters is already in meters
         )
 
         # resize the observation if needed
@@ -424,7 +419,7 @@ def main(cfg : DictConfig):
         if len(objects) == 0:
             objects.extend(detection_list)
             tracker.increment_total_objects(len(detection_list))
-            optional_wandb.log({
+            owandb.log({
                     "total_objects_so_far": tracker.get_total_objects(),
                     "objects_this_frame": len(detection_list),
                 })
@@ -537,7 +532,7 @@ def main(cfg : DictConfig):
             # if obj_label in tracker.prev_obj_names:
             # tracker.prev_obj_names
             entity_path = f"world/objects/{obj_label}"
-            
+
             # Convert points and colors to NumPy arrays
             positions = np.asarray(obj['pcd'].points)
             if hasattr(obj['pcd'], 'colors') and len(obj['pcd'].colors) > 0:
@@ -546,43 +541,24 @@ def main(cfg : DictConfig):
                 colors = colors.astype(np.uint8)
             else:
                 colors = None
-            
+
             # Log point cloud data
-            rr.log(entity_path + "/pcd", rr.Points3D(positions, colors=colors))
-            
+            orr.log(entity_path + "/pcd", orr.Points3D(positions, colors=colors))
+
             # Assuming bbox is extracted as before
             bbox = obj['bbox']
             centers = [bbox.center]
             half_sizes = [bbox.extent /2 ]
             # Convert rotation matrix to quaternion
             bbox_quaternion = [rotation_matrix_to_quaternion(bbox.R)]
-            
-            rr.log(entity_path + "/bbox", rr.Boxes3D(centers=centers, half_sizes=half_sizes, rotations=bbox_quaternion))
-            
+
+            orr.log(entity_path + "/bbox", orr.Boxes3D(centers=centers, half_sizes=half_sizes, rotations=bbox_quaternion))
+
             # Handle class_id which might be a list or an int
             class_id = obj['class_id'][0] if isinstance(obj['class_id'], list) else obj['class_id']
-            
+
             annotation_color = [int(c * 255) for c in obj['inst_color']]  # Normalize to [0, 255]
-
-            
-            # Log class annotation using AnnotationInfo
-            # rr.log(entity_path + "annotations", rr.AnnotationInfo(id=class_id, label=obj['class_name'], color=annotation_color))
-            # rr.log(entity_path + "/class_name", rr.Text(obj['class_name']))
-            # rr.log(entity_path + "/inst_color", rr.components.Color(obj['inst_color']))
-            
-            # t1 = rr.Points3D(positions, colors=colors)
-            # t2 = rr.Boxes3D(centers=centers, half_sizes=half_sizes, rotations=bbox_quaternion)
-            # t3 = rr.components.Color(obj['inst_color'])
-            
-            # rr.log(
-            #     entity_path,
-            #     rr.Points3D(positions, colors=colors),
-            #     rr.Boxes3D(centers=centers, half_sizes=half_sizes, rotations=bbox_quaternion),
-            #     # rr.components.Color(obj['inst_color'])
-            # )
             k=1
-
-        
 
         # Save the objects for the current frame, if needed
         if cfg.save_objects_all_frames:
@@ -673,7 +649,7 @@ def main(cfg : DictConfig):
                 create_symlink=True
             )
 
-        optional_wandb.log({
+        owandb.log({
             "frame_idx": frame_idx,
             "counter": counter,
             "exit_early_flag": exit_early_flag,
@@ -682,7 +658,7 @@ def main(cfg : DictConfig):
 
         tracker.increment_total_objects(len(objects))
         tracker.increment_total_detections(len(detection_list))
-        optional_wandb.log({
+        owandb.log({
                 "total_objects": tracker.get_total_objects(),
                 "objects_this_frame": len(objects),
                 "total_detections": tracker.get_total_detections(),
@@ -721,7 +697,7 @@ def main(cfg : DictConfig):
         if cfg.save_video:
             save_video_detections(det_exp_path)
 
-    optional_wandb.finish()
+    owandb.finish()
 
 if __name__ == "__main__":
     main()

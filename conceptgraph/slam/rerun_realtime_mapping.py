@@ -9,6 +9,7 @@ from conceptgraph.utils.optional_rerun_wrapper import OptionalReRun
 from conceptgraph.utils.optional_wandb_wrapper import OptionalWandB
 from conceptgraph.utils.geometry import rotation_matrix_to_quaternion
 from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker
+from conceptgraph.utils.vlm import get_obj_rel_from_image_gpt4v, get_openai_client
 import cv2
 import os
 import PyQt5
@@ -39,7 +40,7 @@ from omegaconf import DictConfig
 
 # Local application/library specific imports
 from conceptgraph.dataset.datasets_common import get_dataset
-from conceptgraph.utils.vis import OnlineObjectRenderer, save_video_from_frames, vis_result_fast_on_depth
+from conceptgraph.utils.vis import OnlineObjectRenderer, filter_detections, save_video_from_frames, vis_result_fast_on_depth, vis_result_for_vlm
 from conceptgraph.utils.ious import (
     mask_subtract_contained
 )
@@ -171,6 +172,9 @@ def main(cfg : DictConfig):
 
         # Set the classes for the detection model
         detection_model.set_classes(obj_classes.get_classes_arr())
+
+        openai_client = get_openai_client()
+        
     else:
         print("\n".join(["NOT Running detections..."] * 10))
 
@@ -226,6 +230,7 @@ def main(cfg : DictConfig):
             results = detection_model.predict(color_path, conf=0.1, verbose=False)
             confidences = results[0].boxes.conf.cpu().numpy()
             detection_class_ids = results[0].boxes.cls.cpu().numpy().astype(int)
+            detection_class_labels = [f"{obj_classes.get_classes_arr()[class_id]} {class_idx}" for class_idx, class_id in enumerate(detection_class_ids)]
             xyxy_tensor = results[0].boxes.xyxy
             xyxy_np = xyxy_tensor.cpu().numpy()
 
@@ -243,7 +248,34 @@ def main(cfg : DictConfig):
                 class_id=detection_class_ids,
                 mask=masks_np,
             )
+            
+            # First, filter the detections
+            filtered_detections, labels = filter_detections(
+                detections=curr_det, 
+                classes=obj_classes.get_classes_arr(),
+                top_x_detections=10,
+                confidence_threshold=0.3,
+                given_labels = detection_class_labels
+            )
 
+            # Then, use the filtered detections and labels to annotate the image
+            annotated_image_for_vlm, labels = vis_result_for_vlm(
+                image=image, 
+                detections=filtered_detections,  # Use filtered detections here
+                labels=labels,  # Use the labels obtained from filtering
+                draw_bbox=True,
+                thickness=5,
+                text_scale=2,
+                text_thickness=3,
+                text_padding=3,
+                save_path=str(det_exp_vis_path / color_path.name).replace(".jpg", "_for_vlm_process")
+            )
+            vis_save_path_for_vlm = str((det_exp_vis_path / color_path.name).with_suffix(".jpg")).replace(".jpg", "_for_vlm.jpg")
+            
+            cv2.imwrite(str(vis_save_path_for_vlm), annotated_image_for_vlm)
+            print(f"Line 313, vis_save_path_for_vlm: {vis_save_path_for_vlm}")
+            edges = get_obj_rel_from_image_gpt4v(openai_client, vis_save_path_for_vlm, labels)
+            l=1 
             # Compute and save the clip features of detections
             image_crops, image_feats, text_feats = compute_clip_features_batched(
                 image_rgb, curr_det, clip_model, clip_preprocess, clip_tokenizer, obj_classes.get_classes_arr(), cfg.device)
@@ -263,6 +295,9 @@ def main(cfg : DictConfig):
                 "image_crops": image_crops,
                 "image_feats": image_feats,
                 "text_feats": text_feats,
+                "detection_class_labels": detection_class_labels,
+                "labels": labels,
+                "edges": edges,
             }
 
             raw_gobs = results

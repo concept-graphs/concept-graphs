@@ -752,6 +752,8 @@ def filter_gobs(
     for k in gobs.keys():
         if isinstance(gobs[k], str) or k == "classes":  # Captions
             continue
+        if k in ['labels', 'edges']:
+            continue
         elif isinstance(gobs[k], list):
             gobs[k] = [gobs[k][i] for i in idx_to_keep]
         elif isinstance(gobs[k], np.ndarray):

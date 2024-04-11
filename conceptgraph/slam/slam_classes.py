@@ -155,3 +155,29 @@ class MapObjectList(DetectionList):
             del new_obj['pcd_color_np']
             
             self.append(new_obj)
+
+# not sure if I will use this 
+class MapEdge():
+    def __init__(self, obj1, obj2, rel_type):
+        self.obj1 = obj1
+        self.obj2 = obj2
+        self.rel_type = rel_type
+        self.num_detections = 0
+        
+    def to_serializable(self):
+        return {
+            'obj1': self.obj1,
+            'obj2': self.obj2,
+            'rel_type': self.rel_type,
+        }
+    
+    def load_serializable(self, s_edge_dict):
+        self.obj1 = s_edge_dict['obj1']
+        self.obj2 = s_edge_dict['obj2']
+        self.rel_type = s_edge_dict['rel_type']
+        
+    def __str__(self):
+        return f"({self.obj1}, {self.rel_type}, {self.obj2})"
+    
+    def __repr__(self):
+        return str(self)

@@ -46,9 +46,10 @@ from conceptgraph.utils.ious import (
 )
 from conceptgraph.utils.general_utils import ObjectClasses, find_existing_image_path, get_det_out_path, get_exp_out_path, load_saved_detections, load_saved_hydra_json_config, measure_time, save_detection_results, save_hydra_config, save_pointcloud, should_exit_early
 
-from conceptgraph.slam.slam_classes import MapObjectList
+from conceptgraph.slam.slam_classes import MapEdgeMapping, MapObjectList
 from conceptgraph.slam.utils import (
     filter_gobs,
+    filter_objects_w_edges,
     get_bounding_box,
     init_process_pcd,
     make_detection_list_from_pcd_and_gobs,
@@ -83,8 +84,6 @@ from ultralytics import SAM
 import supervision as sv
 import open_clip
 
-import rerun as rr
-
 # Disable torch gradient computation
 torch.set_grad_enabled(False)
 
@@ -99,7 +98,7 @@ def main(cfg : DictConfig):
     
     orr.init("realtime_mapping")
     orr.spawn()
-    
+
     owandb = OptionalWandB()
     owandb.set_use_wandb(cfg.use_wandb)
 
@@ -125,6 +124,7 @@ def main(cfg : DictConfig):
     # cam_K = dataset.get_cam_K()
 
     objects = MapObjectList(device=cfg.device)
+    map_edges = MapEdgeMapping(objects)
 
     # For visualization
     if cfg.vis_render:
@@ -153,12 +153,12 @@ def main(cfg : DictConfig):
     run_detections = check_run_detections(cfg.force_detection, det_exp_path)
     det_exp_pkl_path = get_det_out_path(det_exp_path)
     det_exp_vis_path = get_vis_out_path(det_exp_path)
+    
+    prev_adjusted_pose = None
 
     if run_detections:
         print("\n".join(["Running detections..."] * 10))
         det_exp_path.mkdir(parents=True, exist_ok=True)
-
-        
 
         ## Initialize the detection models
         detection_model = measure_time(YOLO)('yolov8l-world.pt')
@@ -253,8 +253,8 @@ def main(cfg : DictConfig):
             filtered_detections, labels = filter_detections(
                 detections=curr_det, 
                 classes=obj_classes.get_classes_arr(),
-                top_x_detections=10,
-                confidence_threshold=0.3,
+                top_x_detections=15,
+                confidence_threshold=0.1,
                 given_labels = detection_class_labels
             )
 
@@ -265,8 +265,8 @@ def main(cfg : DictConfig):
                 labels=labels,  # Use the labels obtained from filtering
                 draw_bbox=True,
                 thickness=5,
-                text_scale=2,
-                text_thickness=3,
+                text_scale=1,
+                text_thickness=2,
                 text_padding=3,
                 save_path=str(det_exp_vis_path / color_path.name).replace(".jpg", "_for_vlm_process")
             )
@@ -338,7 +338,8 @@ def main(cfg : DictConfig):
         # Don't apply any transformation otherwise
         adjusted_pose = unt_pose
         
-        
+        # you need the params for a rerun function
+        # intrinsics, image_rgb_height, image_rgb_width, color_path , det_exp_vis_path, adjusted_pose, depth_tensor
         # Extract intrinsic parameters
         focal_length = [intrinsics[0, 0].item(), intrinsics[1, 1].item()]  # Assuming fx = fy, else use the average
         principal_point = [intrinsics[0, 2].item(), intrinsics[1, 2].item()]
@@ -371,7 +372,6 @@ def main(cfg : DictConfig):
                 orr.ImageEncoded(path=existing_vis_save_path)
             )
         
-        
         # Convert adjusted_pose to translation and quaternion
         translation = adjusted_pose[:3, 3].tolist()  # Last column
         rotation_matrix = adjusted_pose[:3, :3]
@@ -379,6 +379,33 @@ def main(cfg : DictConfig):
         orr.log(
             "world/camera", orr.Transform3D(translation=translation, rotation=quaternion, from_parent=False)
         )
+        
+        # get pose, this is the untrasformed pose.
+        if frame_idx != 0:
+            # prev_unt_pose = dataset.poses[frame_idx - 1]
+            # prev_unt_pose = prev_unt_pose.cpu().numpy()
+            # prev_adjusted_pose = prev_unt_pose
+            prev_xyz_position = prev_adjusted_pose[:3, 3]
+            
+            curr_xyz_position = adjusted_pose[:3, 3]
+            
+            points = [prev_xyz_position, curr_xyz_position]
+
+            prev_translation = prev_adjusted_pose[:3, 3].tolist()  # Last column
+            prev_rotation_matrix = prev_adjusted_pose[:3, :3]
+            prev_quaternion = orr.Quaternion(xyzw=rotation_matrix_to_quaternion(prev_rotation_matrix))
+            
+        
+            # now log a line from the previous camera pose to the current camera pose
+            orr.log(
+                f"world/camera_trajectory/{frame_idx}",
+                orr.LineStrips3D(
+                    [points],
+                    colors=[[255, 0, 0]]
+                )
+            )
+        prev_adjusted_pose = adjusted_pose
+        k=1
 
         # Assuming depth_tensor is already available and in millimeters
         # Convert depth_tensor from millimeters to meters for rerun (if necessary)
@@ -398,6 +425,8 @@ def main(cfg : DictConfig):
 
         # resize the observation if needed
         resized_gobs = resize_gobs(raw_gobs, image_rgb)
+        len_resized_gobs = len(resized_gobs['mask'])
+        temp_gobs = copy.deepcopy(resized_gobs)
         # filter the observations
         filtered_gobs = filter_gobs(resized_gobs, image_rgb, 
             skip_bg=cfg.skip_bg,
@@ -406,6 +435,11 @@ def main(cfg : DictConfig):
             max_bbox_area_ratio=cfg.max_bbox_area_ratio,
             mask_conf_threshold=cfg.mask_conf_threshold,
         )
+        
+        # check and print if any detections were filtered
+        if len_resized_gobs != len(filtered_gobs['mask']):
+            print(f"=========================Filtered {len_resized_gobs - len(filtered_gobs['mask'])} detections")
+            k=1
 
         gobs = filtered_gobs
 
@@ -426,6 +460,7 @@ def main(cfg : DictConfig):
             obj_pcd_max_points=cfg.obj_pcd_max_points,
             device=cfg.device,
         )
+        k=1
 
         for obj in obj_pcds_and_bboxes:
             if obj:
@@ -482,6 +517,8 @@ def main(cfg : DictConfig):
             agg_sim=agg_sim, 
             detection_threshold=cfg['sim_threshold']  # Use the sim_threshold from the configuration
         )
+        print(f"Line 575, len(objects) before merge: {len(objects)}")
+        initial_objects_count = len(objects)
 
         # Now merge the detected objects into the existing objects based on the match indices
         objects = merge_obj_matches(
@@ -496,8 +533,81 @@ def main(cfg : DictConfig):
             device=cfg['device']
             # Note: Removed 'match_method' and 'phys_bias' as they do not appear in the provided merge function
         )
+        print(f"Line 575, len(objects) AFTER merge: {len(objects)}")
+
+
+
+        # Step 1: Generate match_indices_w_new_obj with indices for new objects
+        # Initial count of objects before processing new detections
+        new_object_count = 0  # Counter for new objects
+
+        # Create a list of match indices with new objects index instead of None
+        match_indices_w_new_obj = []
+        for match_index in match_indices:
+            if match_index is None:
+                # Assign the future index for new objects and increment the counter
+                new_obj_index = initial_objects_count + new_object_count
+                match_indices_w_new_obj.append(new_obj_index)
+                new_object_count += 1
+            else:
+                match_indices_w_new_obj.append(match_index)
+
+        # Step 2: Create a mapping from 2D detection labels to detection indices
+        detection_label_to_index = {label: index for index, label in enumerate(gobs['detection_class_labels'])}
+        
+        # Step 3: Use match_indices_w_new_obj for translating 2D edges to indices in the existing objects list
+        curr_edges_3d_by_index = []
+        for edge in gobs['edges']:
+            obj1_label, relation, obj2_label = edge
+            
+            # Find the 2D detection indices for obj1 and obj2 using the full label
+            obj1_index = detection_label_to_index.get(obj1_label)  # Use the full label
+            obj2_index = detection_label_to_index.get(obj2_label)  # Use the full label
+            
+            # check that the indices are not None
+            if (obj1_index is None) or (obj2_index is None):
+                print(f"Line 623, obj1_index: {obj1_index}")
+                print(f"Line 623, obj2_index: {obj2_index}")
+                print(f"Line 624, obj1_label: {obj1_label}")
+                print(f"Line 624, obj2_label: {obj2_label}")
+                k=1
+                # sometimes gpt4v returns a relation with a class that is not in the detections
+                continue
+            
+            
+            # check that the object indices are not out of range
+            if (obj1_index is None) or (obj1_index >= len(match_indices_w_new_obj)):
+                continue
+            if (obj2_index is None) or (obj2_index >= len(match_indices_w_new_obj)):
+                continue
+            
+            # Directly map 2D detection indices to object list indices using match_indices_w_new_obj
+            obj1_objects_index = match_indices_w_new_obj[obj1_index] if obj1_index is not None else None
+            obj2_objects_index = match_indices_w_new_obj[obj2_index] if obj2_index is not None else None
+
+            curr_edges_3d_by_index.append((obj1_objects_index, relation, obj2_objects_index))
+
+        print(f"Line 624, curr_edges_3d_by_index: {curr_edges_3d_by_index}")
+        
+        # Add the new edges to the map
+        for (obj_1_idx, rel_type, obj_2_idx) in curr_edges_3d_by_index:
+            map_edges.add_or_update_edge(obj_1_idx, obj_2_idx, rel_type)
+            
+        # Just making a copy of the edges by object number for viz
+        map_edges_by_curr_obj_num = []
+        for (obj1_idx, obj2_idx), map_edge in map_edges.edges_by_index.items():
+            # check if the idxes are more than the length of the objects, if so, continue
+            if obj1_idx >= len(objects) or obj2_idx >= len(objects):
+                continue
+            obj1_curr_obj_num = objects[obj1_idx]['curr_obj_num']
+            obj2_curr_obj_num = objects[obj2_idx]['curr_obj_num']
+            rel_type = map_edge.rel_type
+            map_edges_by_curr_obj_num.append((obj1_curr_obj_num, rel_type, obj2_curr_obj_num))
 
         is_final_frame = frame_idx == len(dataset) - 1
+        if is_final_frame:
+            print("Final frame detected. Performing final post-processing...")
+            k=1
 
         ### Perform post-processing periodically if told so
 
@@ -508,6 +618,7 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
+            print(f"Line 675, Denoising objects for frame {frame_idx}")
             objects = measure_time(denoise_objects)(
                 downsample_voxel_size=cfg['downsample_voxel_size'], 
                 dbscan_remove_noise=cfg['dbscan_remove_noise'], 
@@ -525,10 +636,13 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
-            objects = filter_objects(
+            print(f"Line 688, Filtering objects for frame {frame_idx}")
+            # objects = filter_objects(
+            objects = filter_objects_w_edges(
                 obj_min_points=cfg['obj_min_points'], 
                 obj_min_detections=cfg['obj_min_detections'], 
-                objects=objects
+                objects=objects,
+                map_edges=map_edges
             )
 
         # Merging
@@ -538,6 +652,7 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
+            print(f"Line 699, Merging objects for frame {frame_idx}")
             objects = measure_time(merge_objects)(
                 merge_overlap_thresh=cfg["merge_overlap_thresh"],
                 merge_visual_sim_thresh=cfg["merge_visual_sim_thresh"],
@@ -549,23 +664,26 @@ def main(cfg : DictConfig):
                 dbscan_min_points=cfg["dbscan_min_points"],
                 spatial_sim_type=cfg["spatial_sim_type"],
                 device=cfg["device"],
+                map_edges=map_edges
             )
             
-        # Assume 'objects' is your list of objects for the current frame
-        for obj in objects:
-            # tracker.total_object_count
-            # print(f"Line 525, tracker.total_object_count: {tracker.total_object_count}")
+
+        # what you need for the second log rerun function
+        # for full loop, objects
+        # for each object:
+        # obj['pcd'], obj['bbox']       
+            
+        for obj_idx, obj in enumerate(objects):
+            
+            if obj['num_detections'] < 3:
+                continue
+
+            if obj['is_background']:
+                continue
+            
             obj_label = f"{obj['curr_obj_num']}_{obj['class_name']}"
-            # obj['new_counter']
-            # print(f"-------------------------------------------------Line 528, obj['new_counter']: {obj['new_counter']}")
-            # print(f"Line 527, obj['curr_obj_num']: {obj['curr_obj_num']}")
-            # replace whatspace with underscore in the label
             obj_label = obj_label.replace(" ", "_")
-            # print(f"Line 527, obj_label: {obj_label}")
-            # print(f"Line 530, obj['num_obj_in_class']: {obj['num_obj_in_class']}")
-            # print(f"Line 529, obj['id']: {obj['id']}")
-            # if obj_label in tracker.prev_obj_names:
-            # tracker.prev_obj_names
+            base_entity_path = "world/objects"
             entity_path = f"world/objects/{obj_label}"
 
             # Convert points and colors to NumPy arrays
@@ -576,9 +694,51 @@ def main(cfg : DictConfig):
                 colors = colors.astype(np.uint8)
             else:
                 colors = None
+                
+            curr_obj_color = obj_classes.get_class_color(obj['class_name'])
+            curr_obj_inst_color = obj['inst_color']
 
             # Log point cloud data
-            orr.log(entity_path + "/pcd", orr.Points3D(positions, colors=colors))
+            orr.log(
+                base_entity_path + "/rgb_pcd" + f"/{obj_label}",
+                # entity_path + "/pcd", 
+                orr.Points3D(
+                    positions, 
+                    colors=colors,
+                    # labels=[obj_label],
+                ),
+                orr.AnyValues(
+                    uuid = str(obj['id']),
+                )
+            )
+            
+            # Log point cloud data
+            orr.log(
+                base_entity_path + "/seg_pcd" + f"/{obj_label}",
+                # entity_path + "/pcd", 
+                orr.Points3D(
+                    positions, 
+                    colors=[curr_obj_color],
+                    # labels=[obj_label],
+                ),
+                orr.AnyValues(
+                    uuid = str(obj['id']),
+                )
+            )
+            
+            # Log point cloud data
+            orr.log(
+                base_entity_path + "/inst_pcd" + f"/{obj_label}",
+                # entity_path + "/pcd", 
+                orr.Points3D(
+                    positions, 
+                    colors=curr_obj_inst_color,
+                    # labels=[obj_label],
+                ),
+                orr.AnyValues(
+                    uuid = str(obj['id']),
+                )
+            )
 
             # Assuming bbox is extracted as before
             bbox = obj['bbox']
@@ -587,13 +747,141 @@ def main(cfg : DictConfig):
             # Convert rotation matrix to quaternion
             bbox_quaternion = [rotation_matrix_to_quaternion(bbox.R)]
 
-            orr.log(entity_path + "/bbox", orr.Boxes3D(centers=centers, half_sizes=half_sizes, rotations=bbox_quaternion))
+            orr.log(
+                base_entity_path + "/bbox" + f"/{obj_label}",
+                # entity_path + "/bbox", 
+                orr.Boxes3D(
+                    centers=centers, 
+                    half_sizes=half_sizes, 
+                    rotations=bbox_quaternion,
+                    colors=[curr_obj_color],
+                    # labels=[f"{obj_label}_({obj['num_detections']})"],
+                ),
+                orr.AnyValues(
+                    uuid = str(obj['id']),
+                )
+            )
+            
+            orr.log(
+                base_entity_path + "/bbox_w_labels" + f"/{obj_label}",
+                # entity_path + "/bbox", 
+                orr.Boxes3D(
+                    centers=centers, 
+                    half_sizes=half_sizes, 
+                    rotations=bbox_quaternion,
+                    labels=[f"{obj_label}_({obj['num_detections']})"],
+                    colors=[curr_obj_color],
+                ),
+                orr.AnyValues(
+                    uuid = str(obj['id']),
+                )
+            )
+            # {obj['class_name']}
+            orr.log(
+                base_entity_path + "/bbox_w_name" + f"/{obj_label}",
+                # entity_path + "/bbox", 
+                orr.Boxes3D(
+                    centers=centers, 
+                    half_sizes=half_sizes, 
+                    rotations=bbox_quaternion,
+                    labels=[f"{obj['class_name']}"],
+                    colors=[curr_obj_color],
+                ),
+                orr.AnyValues(
+                    uuid = str(obj['id']),
+                )
+            )
 
-            # Handle class_id which might be a list or an int
-            class_id = obj['class_id'][0] if isinstance(obj['class_id'], list) else obj['class_id']
-
-            annotation_color = [int(c * 255) for c in obj['inst_color']]  # Normalize to [0, 255]
-            k=1
+            
+        # do the same for edges
+        for map_edge_tuple in map_edges.edges_by_index.items():
+            obj1_idx, obj2_idx = map_edge_tuple[0]
+            map_edge = map_edge_tuple[1]
+            num_dets = map_edge.num_detections
+            if num_dets < 3:
+                continue
+            obj1_label = f"{objects[obj1_idx]['curr_obj_num']}"
+            obj2_label = f"{objects[obj2_idx]['curr_obj_num']}"
+            
+            obj_1_num_dets = objects[obj1_idx]['num_detections']
+            obj_2_num_dets = objects[obj2_idx]['num_detections']
+            
+            if obj_1_num_dets < 3 or obj_2_num_dets < 3:
+                continue
+            
+            
+            rel_type = map_edge.rel_type.replace(" ", "_")
+            edge_label_by_curr_num = f"{obj1_label}_{rel_type}_{obj2_label}"
+            entity_path = f"world/edges/{edge_label_by_curr_num}"
+            base_entity_path = "world/edges"
+            
+            
+            endpoints = map_edges.get_edge_endpoints(obj1_idx, obj2_idx)
+            obj1_full_label = f"{objects[obj1_idx]['curr_obj_num']}_{objects[obj1_idx]['class_name']}".replace(" ", "_")
+            obj2_full_label = f"{objects[obj2_idx]['curr_obj_num']}_{objects[obj2_idx]['class_name']}".replace(" ", "_")
+            full_label = f"{obj1_full_label}__{rel_type}__{obj2_full_label}_({num_dets})"
+            name_label = f"{objects[obj1_idx]['class_name']}__{rel_type}__{objects[obj2_idx]['class_name']}"
+            
+            obj_2_color = obj_classes.get_class_color(objects[obj2_idx]['class_name'])
+            orr.log(
+                base_entity_path + f"/edges_no_labels" + f"/{edge_label_by_curr_num}", 
+                orr.LineStrips3D(
+                    endpoints,
+                    colors=[obj_2_color],
+                    # labels=[f"{num_dets}"],
+                ),
+                orr.AnyValues(
+                    full_label = full_label
+                )
+            )
+            
+            orr.log(
+                base_entity_path + f"/edges_w_num_det_labels" + f"/{edge_label_by_curr_num}", 
+                orr.LineStrips3D(
+                    endpoints,
+                    labels=[f"{num_dets}"],
+                    colors=[obj_2_color],
+                ),
+                orr.AnyValues(
+                    full_label = full_label
+                )
+            )
+            
+            orr.log(
+                base_entity_path + f"/edges_w_rel_type_labels" + f"/{edge_label_by_curr_num}", 
+                orr.LineStrips3D(
+                    endpoints,
+                    labels=[f"{rel_type}"],
+                    colors=[obj_2_color],
+                ),
+                orr.AnyValues(
+                    full_label = full_label
+                )
+            )
+            
+            orr.log(
+                base_entity_path + f"/edges_w_full_labels" + f"/{edge_label_by_curr_num}", 
+                orr.LineStrips3D(
+                    endpoints,
+                    labels=[f"{full_label}"],
+                    colors=[obj_2_color],
+                ),
+                orr.AnyValues(
+                    full_label = full_label
+                )
+            )
+            
+            orr.log(
+                base_entity_path + f"/edges_w_names" + f"/{edge_label_by_curr_num}", 
+                orr.LineStrips3D(
+                    endpoints,
+                    labels=[f"{name_label}"],
+                    colors=[obj_2_color],
+                ),
+                orr.AnyValues(
+                    full_label = full_label
+                )
+            )
 
         # Save the objects for the current frame, if needed
         if cfg.save_objects_all_frames:
@@ -672,18 +960,6 @@ def main(cfg : DictConfig):
                 save_video_from_frames(frames, video_save_path, fps=10)
                 print("Save video to %s" % video_save_path)
 
-        if counter % 10 == 0:
-            # save the pointcloud
-            save_pointcloud(
-                exp_suffix=cfg.exp_suffix,
-                exp_out_path=exp_out_path,
-                cfg=cfg,
-                objects=objects,
-                obj_classes=obj_classes,
-                latest_pcd_filepath=cfg.latest_pcd_filepath,
-                create_symlink=True
-            )
-
         owandb.log({
             "frame_idx": frame_idx,
             "counter": counter,
@@ -705,6 +981,18 @@ def main(cfg : DictConfig):
                 })
         # print("hey")
     # LOOP OVER -----------------------------------------------------
+    
+    # Save the rerun output if needed
+    if cfg.use_rerun and cfg.save_rerun:
+        temp = exp_out_path / f"rerun_{cfg.exp_suffix}.rrd"
+        print("Mapping done!")
+        print("If you want to save the rerun file, you should do so from the rerun viewer now.")
+        print("You can't yet both save and log a file in rerun.")
+        print("If you do, make a pull request!")
+        print("Also, close the viewer before continuing, it frees up a lot of RAM, which helps for saving the pointclouds.")
+        print(f"Feel free to copy and use this path below, or choose your own:\n{temp}")
+        input(f"Then press Enter to continue.")
+        k=1
 
     # Save the pointcloud
     if cfg.save_pcd:
@@ -715,7 +1003,8 @@ def main(cfg : DictConfig):
             objects=objects,
             obj_classes=obj_classes,
             latest_pcd_filepath=cfg.latest_pcd_filepath,
-            create_symlink=True
+            create_symlink=True,
+            edges=map_edges
         )
 
     # Save metadata if all frames are saved

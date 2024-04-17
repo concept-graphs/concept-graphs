@@ -81,4 +81,7 @@ class_agnostic: !!bool False   # If set, the color will be set by instance, rath
 save_objects_all_frames: !!bool False   # If True, the objects at all timesteps will be saved for future animation
 
 
+use_rerun: !!bool False
+save_rerun: !!bool False
+
 latest_pcd_filepath: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/latest_pcd_save

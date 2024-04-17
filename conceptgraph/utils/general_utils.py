@@ -336,7 +336,7 @@ class ObjectClasses:
         return {str(i): self.get_class_color(i) for i in range(len(self.classes))}
 
 
-def save_pointcloud(exp_suffix, exp_out_path, cfg, objects, obj_classes, latest_pcd_filepath=None, create_symlink=True):
+def save_pointcloud(exp_suffix, exp_out_path, cfg, objects, obj_classes, latest_pcd_filepath=None, create_symlink=True, edges = None):
     """
     Saves the point cloud data to a .pkl.gz file. Optionally, creates or updates a symlink to the latest saved file.
 
@@ -348,12 +348,14 @@ def save_pointcloud(exp_suffix, exp_out_path, cfg, objects, obj_classes, latest_
     - latest_pcd_filepath (Path or str, optional): Path for the symlink to the latest point cloud save. Default is None.
     - create_symlink (bool): Whether to create/update a symlink to the latest save. Default is True.
     """
+    print("saving map...")
     # Prepare the results dictionary
     results = {
         'objects': objects.to_serializable(),
         'cfg': cfg_to_dict(cfg),
         'class_names': obj_classes.get_classes_arr(),
         'class_colors': obj_classes.get_class_color_dict_by_index(),
+        'edges': edges.to_serializable() if edges is not None else None,
     }
 
     # Define the save path for the point cloud
@@ -365,6 +367,8 @@ def save_pointcloud(exp_suffix, exp_out_path, cfg, objects, obj_classes, latest_
     with gzip.open(pcd_save_path, "wb") as f:
         pickle.dump(results, f)
     print(f"Saved point cloud to {pcd_save_path}")
+    if edges is not None:
+        print(f"Also saved edges to {pcd_save_path}")
 
     # Create or update the symlink if requested
     if create_symlink and latest_pcd_filepath:

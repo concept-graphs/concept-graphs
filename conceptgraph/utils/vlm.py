@@ -91,34 +91,40 @@ def get_obj_rel_from_image_gpt4v(client: OpenAI, image_path: str, label_list: li
     user_query = f"Here is the list of labels for the annotations of the objects in the image: {label_list}. Please describe the spatial relationships between the objects in the image."
     
     
-    
-    response = client.chat.completions.create(
-    model="gpt-4-vision-preview",
-    messages=[
-        {
-            "role": "system",
-            "content": system_prompt
-        },
-        {
-            "role": "user",
-            "content": [
+    vlm_answer = []
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=[
                 {
-                    "type": "image_url",
-                    "image_url": f"data:image/jpeg;base64,{base64_image}",
+                    "role": "system",
+                    "content": system_prompt
                 },
-            ],
-        },
-        {
-            "role": "user",
-            "content": user_query
-        }
-    ]
-    )
-    
-    vlm_answer_str = response.choices[0].message.content
-    print(f"Line 113, vlm_answer_str: {vlm_answer_str}")
-    
-    vlm_answer = extract_list_of_tuples(vlm_answer_str)
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": f"data:image/jpeg;base64,{base64_image}",
+                        },
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": user_query
+                }
+            ]
+        )
+        
+        vlm_answer_str = response.choices[0].message.content
+        print(f"Line 113, vlm_answer_str: {vlm_answer_str}")
+        
+        vlm_answer = extract_list_of_tuples(vlm_answer_str)
+
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        print(f"Setting vlm_answer to an empty list.")
+        vlm_answer = []
     print(f"Line 68, user_query: {user_query}")
     print(f"Line 97, vlm_answer: {vlm_answer}")
     

@@ -20,7 +20,7 @@ import faiss
 import uuid
 
 from conceptgraph.utils.general_utils import measure_time, to_tensor, to_numpy, Timer
-from conceptgraph.slam.slam_classes import MapObjectList, DetectionList
+from conceptgraph.slam.slam_classes import MapEdgeMapping, MapObjectList, DetectionList
 
 from conceptgraph.utils.ious import compute_3d_iou, compute_3d_iou_accurate_batch, compute_iou_batch
 from conceptgraph.dataset.datasets_common import from_intrinsics_matrix
@@ -223,11 +223,11 @@ def process_pcd(pcd, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbs
     
     if dbscan_remove_noise and run_dbscan:
         pass
-        # pcd = pcd_denoise_dbscan(
-        #     pcd, 
-        #     eps=dbscan_eps, 
-        #     min_points=dbscan_min_points
-        # )
+        pcd = pcd_denoise_dbscan(
+            pcd, 
+            eps=dbscan_eps, 
+            min_points=dbscan_min_points
+        )
         
     return pcd
 
@@ -550,7 +550,8 @@ def merge_overlap_objects(
     x = x[sort]
     y = y[sort]
     overlap_ratio = overlap_ratio[sort]
-
+    
+    merge_operations = []  # to track merge operations
     kept_objects = np.ones(
         len(objects), dtype=bool
     )  # Initialize all objects as 'kept' initially
@@ -586,6 +587,7 @@ def merge_overlap_objects(
                         run_dbscan=True,
                     )
                     kept_objects[i] = False  # Mark object i as 'merged'
+                    merge_operations.append((i, j))  # Record this merge for edge updates 
         else:
             break  # Stop processing if the current overlap ratio is below the threshold
 
@@ -593,7 +595,7 @@ def merge_overlap_objects(
     new_objects = [obj for obj, keep in zip(objects, kept_objects) if keep]
     objects = MapObjectList(new_objects)
 
-    return objects
+    return objects, merge_operations
 
 # @profile
 def denoise_objects(
@@ -638,6 +640,28 @@ def denoise_objects(
     return objects
 
 # @profile
+def filter_objects_w_edges(obj_min_points: int, obj_min_detections: int, objects: MapObjectList, map_edges: MapEdgeMapping):
+    print("Before filtering:", len(objects))
+    objects_to_keep = []
+    new_index_map = {}  # Maps old indices to new indices
+
+    # Identify which objects to keep
+    for index, obj in enumerate(objects):
+        if len(obj["pcd"].points) >= obj_min_points and obj["num_detections"] >= obj_min_detections:
+            objects_to_keep.append(obj)
+            new_index_map[index] = len(objects_to_keep) - 1
+
+    # Create a new MapObjectList from the kept objects
+    new_objects = MapObjectList(objects_to_keep)
+    print("After filtering:", len(new_objects))
+
+    # Update edges to reflect the new indices
+    if map_edges:
+        map_edges.update_indices(new_index_map, new_objects)
+
+    return new_objects
+
+# @profile
 def filter_objects(
     obj_min_points: int, obj_min_detections: int, objects: MapObjectList
 ):
@@ -666,6 +690,7 @@ def merge_objects(
     dbscan_min_points: int,
     spatial_sim_type: str,
     device: str,
+    map_edges = None,
 ):
     if len(objects) == 0:
         return objects
@@ -680,7 +705,7 @@ def merge_objects(
     )
     print("Before merging:", len(objects))
     # Pass all necessary configuration parameters to merge_overlap_objects
-    objects = merge_overlap_objects(
+    objects, merge_operations = merge_overlap_objects(
         merge_overlap_thresh=merge_overlap_thresh,
         merge_visual_sim_thresh=merge_visual_sim_thresh,
         merge_text_sim_thresh=merge_text_sim_thresh,
@@ -693,7 +718,13 @@ def merge_objects(
         spatial_sim_type=spatial_sim_type,
         device=device,
     )
-    print("After merging:", len(objects))
+
+    if map_edges is not None:
+        # Apply each recorded merge operation to the edges
+        for source_idx, dest_idx in merge_operations:
+            map_edges.merge_objects_edges(source_idx, dest_idx)
+        map_edges.update_objects_list(objects)
+        print("After merging:", len(objects))
 
     return objects
 
@@ -752,7 +783,7 @@ def filter_gobs(
     for k in gobs.keys():
         if isinstance(gobs[k], str) or k == "classes":  # Captions
             continue
-        if k in ['labels', 'edges']:
+        if k in ['labels', 'edges', 'detection_class_labels']:
             continue
         elif isinstance(gobs[k], list):
             gobs[k] = [gobs[k][i] for i in idx_to_keep]
@@ -955,12 +986,9 @@ def make_detection_list_from_pcd_and_gobs(
         
         is_bg_object = bool(curr_class_name in obj_classes.get_bg_classes_arr())
         
-        tracker.curr_class_count[curr_class_name] += 1
-        tracker.total_object_count += 1
         # print(f"Line 937, tracker.total_object_count INCREMENTED: {tracker.total_object_count }")
         num_obj_in_class = tracker.curr_class_count[curr_class_name]
         
-        tracker.brand_new_counter += 1
         
         detected_object = {
             'id' : uuid.uuid4(),
@@ -998,6 +1026,10 @@ def make_detection_list_from_pcd_and_gobs(
         #     bg_detection_list.append(detected_object)
         # else:
         detection_list.append(detected_object)
+        
+        tracker.curr_class_count[curr_class_name] += 1
+        tracker.total_object_count += 1
+        tracker.brand_new_counter += 1
     
     return detection_list # , bg_detection_list
 

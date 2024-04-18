@@ -158,26 +158,186 @@ class MapObjectList(DetectionList):
 
 # not sure if I will use this 
 class MapEdge():
-    def __init__(self, obj1, obj2, rel_type):
-        self.obj1 = obj1
-        self.obj2 = obj2
+    def __init__(self, obj1_idx, obj2_idx, rel_type, num_detections=1):
+        self.obj1_idx = obj1_idx
+        self.obj2_idx = obj2_idx
         self.rel_type = rel_type
-        self.num_detections = 0
+        self.num_detections = num_detections
         
     def to_serializable(self):
         return {
-            'obj1': self.obj1,
-            'obj2': self.obj2,
+            'obj1_idx': self.obj1_idx,
+            'obj2_idx': self.obj2_idx,
             'rel_type': self.rel_type,
         }
     
     def load_serializable(self, s_edge_dict):
-        self.obj1 = s_edge_dict['obj1']
-        self.obj2 = s_edge_dict['obj2']
+        self.obj1_idx = s_edge_dict['obj1_idx']
+        self.obj2_idx = s_edge_dict['obj2_idx']
         self.rel_type = s_edge_dict['rel_type']
         
     def __str__(self):
-        return f"({self.obj1}, {self.rel_type}, {self.obj2})"
+        return f"({self.obj1_idx}, {self.rel_type}, {self.obj2_idx}), num_det: {self.num_detections}"
     
     def __repr__(self):
         return str(self)
+    
+class MapEdgeMapping:
+    def __init__(self, objects):
+        self.objects = objects  # Reference to the list of existing objects
+        self.edges_by_index = {}  # {(obj1_index, obj2_index): MapEdge}
+        self.edges_by_uuid = {}  # {(obj1_uuid, obj2_uuid): MapEdge}
+
+    def add_or_update_edge(self, obj1_index, obj2_index, rel_type):
+        obj1_uuid, obj2_uuid = self.objects[obj1_index]['id'], self.objects[obj2_index]['id']
+        uuid_key = (obj1_uuid, obj2_uuid)
+        
+        if (obj1_index, obj2_index) in self.edges_by_index:
+            edge = self.edges_by_index[(obj1_index, obj2_index)]
+            edge.num_detections += 1
+        else:
+            edge = MapEdge(obj1_index, obj2_index, rel_type)
+            self.edges_by_index[(obj1_index, obj2_index)] = edge
+            self.edges_by_uuid[uuid_key] = edge
+
+    def delete_object_edges(self, obj_index):
+        # Remove all edges associated with the object at obj_index
+        to_remove = [key for key in self.edges_by_index if obj_index in key]
+        for key in to_remove:
+            # Remove from both index-based and UUID-based storage
+            del self.edges_by_index[key]
+            uuid_key = (self.objects[key[0]]['id'], self.objects[key[1]]['id'])
+            del self.edges_by_uuid[uuid_key]
+            
+    def update_indices(self, index_map, new_objects):
+        self.objects = new_objects  # Update the objects reference if necessary
+        new_edges_by_index = {}
+        new_edges_by_uuid = {}
+
+        for (old_obj1_index, old_obj2_index), edge in list(self.edges_by_index.items()):
+            new_obj1_index = index_map.get(old_obj1_index)
+            new_obj2_index = index_map.get(old_obj2_index)
+
+            if new_obj1_index is not None and new_obj2_index is not None:
+                new_key = (new_obj1_index, new_obj2_index)
+                new_uuid_key = (self.objects[new_obj1_index]['id'], self.objects[new_obj2_index]['id'])
+
+                if new_key in new_edges_by_index:
+                    new_edges_by_index[new_key].num_detections += edge.num_detections
+                else:
+                    edge.obj1 = new_obj1_index  # Update the edge's internal object index reference
+                    edge.obj2 = new_obj2_index
+                    new_edges_by_index[new_key] = edge
+                    new_edges_by_uuid[new_uuid_key] = edge
+
+        self.edges_by_index = new_edges_by_index
+        self.edges_by_uuid = new_edges_by_uuid
+        
+    def update_objects_list(self, new_objects):
+        self.objects = new_objects
+
+    def merge_objects_edges(self, source_index, destination_index):
+        # Update edges for a merged object. source_index object is merged into destination_index object
+        updated_edges_by_index = {}
+        updated_edges_by_uuid = {}
+
+        for (obj1_index, obj2_index), edge in self.edges_by_index.items():
+            # Check if source object is part of the edge and update the edge accordingly
+            if obj1_index == source_index:
+                obj1_index = destination_index
+            if obj2_index == source_index:
+                obj2_index = destination_index
+
+            # Generate new edge key and UUID key
+            new_key = (obj1_index, obj2_index)
+            obj1_uuid, obj2_uuid = self.objects[obj1_index]['id'], self.objects[obj2_index]['id']
+            new_uuid_key = (obj1_uuid, obj2_uuid)
+
+            # Check if the edge already exists after merge, update num_detections if it does
+            if new_key in updated_edges_by_index:
+                updated_edges_by_index[new_key].num_detections += edge.num_detections
+            else:
+                edge.obj1_idx = obj1_index
+                edge.obj2_idx = obj2_index
+                updated_edges_by_index[new_key] = edge
+                updated_edges_by_uuid[new_uuid_key] = edge
+
+        # Update the class attributes
+        self.edges_by_index = updated_edges_by_index
+        self.edges_by_uuid = updated_edges_by_uuid
+        
+    def get_edges_by_curr_obj_num(self):
+        map_edges_by_curr_obj_num = []
+        for (obj1_idx, obj2_idx), map_edge in self.edges_by_index.items():
+            obj1_curr_obj_num = self.objects[obj1_idx]['curr_obj_num']
+            obj2_curr_obj_num = self.objects[obj2_idx]['curr_obj_num']
+            rel_type = map_edge.rel_type
+            map_edges_by_curr_obj_num.append((obj1_curr_obj_num, rel_type, obj2_curr_obj_num))
+        return map_edges_by_curr_obj_num
+    
+    def get_edges_by_curr_obj_num_label(self):
+        map_edges_by_curr_obj_num_label = []
+        for (obj1_idx, obj2_idx), map_edge in self.edges_by_index.items():
+            # Construct the curr_obj_num_label for both objects
+            obj1 = self.objects[obj1_idx]
+            obj2 = self.objects[obj2_idx]
+            obj1_curr_obj_num_label = f"{obj1['curr_obj_num']}_{obj1['class_name']}"
+            obj2_curr_obj_num_label = f"{obj2['curr_obj_num']}_{obj2['class_name']}"
+
+            # Append the edge with the formatted labels
+            map_edges_by_curr_obj_num_label.append((obj1_curr_obj_num_label, map_edge.rel_type, obj2_curr_obj_num_label))
+        return map_edges_by_curr_obj_num_label
+
+    def get_edge_endpoints(self, obj1_index, obj2_index):
+        # Check if the edge exists
+        if (obj1_index, obj2_index) in self.edges_by_index:
+            obj1_center = np.asarray(self.objects[obj1_index]['bbox'].get_center())
+            obj2_center = np.asarray(self.objects[obj2_index]['bbox'].get_center())
+            return [obj1_center, obj2_center]
+        return None
+
+    def __str__(self):
+        return '\n'.join([str(edge) for edge in self.edges_by_index.values()])
+
+    def __repr__(self):
+        return self.__str__()
+    
+    def to_serializable(self):
+        s_edges = []
+        for (obj1_index, obj2_index), edge in self.edges_by_index.items():
+            s_edges.append({
+                'obj1_index': obj1_index,
+                'obj2_index': obj2_index,
+                'rel_type': edge.rel_type,
+                'num_detections': edge.num_detections
+            })
+        
+        # Serialize the object list using its existing method
+        s_objects = self.objects.to_serializable()
+        
+        return {
+            'edges': s_edges,
+            'objects': s_objects
+        }
+        
+    def load_serializable(self, s_data):
+        assert len(self.edges_by_index) == 0 and len(self.objects) == 0, 'MapEdgeMapping should be empty when loading'
+        
+        # Deserialize the objects list first
+        self.objects.load_serializable(s_data['objects'])
+        
+        # Rebuild the edges
+        for s_edge in s_data['edges']:
+            obj1_index = s_edge['obj1_index']
+            obj2_index = s_edge['obj2_index']
+            rel_type = s_edge['rel_type']
+            num_detections = s_edge['num_detections']
+            
+            # Create a new edge
+            edge = MapEdge(obj1_index, obj2_index, rel_type, num_detections)
+            self.edges_by_index[(obj1_index, obj2_index)] = edge
+            
+            # Assuming 'id' attribute exists in the objects for UUID key generation
+            obj1_uuid = self.objects[obj1_index]['id']
+            obj2_uuid = self.objects[obj2_index]['id']
+            self.edges_by_uuid[(obj1_uuid, obj2_uuid)] = edge

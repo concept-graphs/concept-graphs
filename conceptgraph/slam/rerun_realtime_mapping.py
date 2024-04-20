@@ -5,7 +5,7 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 # Standard library imports
 from typing import Mapping
 import uuid
-from conceptgraph.utils.optional_rerun_wrapper import OptionalReRun
+from conceptgraph.utils.optional_rerun_wrapper import OptionalReRun, orr_log_annotated_image, orr_log_camera, orr_log_depth_image, orr_log_edges, orr_log_objs_pcd_and_bbox, orr_log_rgb_image
 from conceptgraph.utils.optional_wandb_wrapper import OptionalWandB
 from conceptgraph.utils.geometry import rotation_matrix_to_quaternion
 from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker

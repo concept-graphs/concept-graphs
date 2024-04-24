@@ -1,4 +1,7 @@
-dataset_root: /home/kuwajerw/new_local_data/new_record3d/ali_apartment
-dataset_config: /home/kuwajerw/new_local_data/new_record3d/ali_apartment/apt_scan_no_smooth_processed/dataconfig.yaml
-scene_id: apt_scan_no_smooth_processed
-render_camera_path: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/conceptgraph/dataset/dataconfigs/record3d/record_3d_camera.json
+defaults:
+  - base_paths
+  
+dataset_root: ${data_root}/new_record3d/ali_apartment
+dataset_config: ${data_root}/new_record3d/ali_apartment/co_store_processed/dataconfig.yaml
+scene_id: co_store_processed
+render_camera_path: ${repo_root}/conceptgraph/dataset/dataconfigs/record3d/record_3d_camera.json

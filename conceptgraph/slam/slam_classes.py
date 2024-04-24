@@ -122,7 +122,7 @@ class MapObjectList(DetectionList):
             s_obj_dict = copy.deepcopy(obj)
             
             s_obj_dict['clip_ft'] = to_numpy(s_obj_dict['clip_ft'])
-            s_obj_dict['text_ft'] = to_numpy(s_obj_dict['text_ft'])
+            # s_obj_dict['text_ft'] = to_numpy(s_obj_dict['text_ft'])
             
             s_obj_dict['pcd_np'] = np.asarray(s_obj_dict['pcd'].points)
             s_obj_dict['bbox_np'] = np.asarray(s_obj_dict['bbox'].get_box_points())
@@ -141,7 +141,7 @@ class MapObjectList(DetectionList):
             new_obj = copy.deepcopy(s_obj_dict)
             
             new_obj['clip_ft'] = to_tensor(new_obj['clip_ft'])
-            new_obj['text_ft'] = to_tensor(new_obj['text_ft'])
+            # new_obj['text_ft'] = to_tensor(new_obj['text_ft'])
             
             new_obj['pcd'] = o3d.geometry.PointCloud()
             new_obj['pcd'].points = o3d.utility.Vector3dVector(new_obj['pcd_np'])

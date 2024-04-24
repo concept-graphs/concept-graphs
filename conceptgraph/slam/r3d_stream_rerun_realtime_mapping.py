@@ -9,6 +9,7 @@ from conceptgraph.utils.optional_rerun_wrapper import OptionalReRun, orr_log_ann
 from conceptgraph.utils.optional_wandb_wrapper import OptionalWandB
 from conceptgraph.utils.geometry import rotation_matrix_to_quaternion
 from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker
+from conceptgraph.utils.record3d_utils import DemoApp
 from conceptgraph.utils.vlm import get_obj_rel_from_image_gpt4v, get_openai_client
 import cv2
 import os
@@ -44,7 +45,7 @@ from conceptgraph.utils.vis import OnlineObjectRenderer, filter_detections, save
 from conceptgraph.utils.ious import (
     mask_subtract_contained
 )
-from conceptgraph.utils.general_utils import ObjectClasses, find_existing_image_path, get_det_out_path, get_exp_out_path, load_saved_detections, load_saved_hydra_json_config, measure_time, save_detection_results, save_hydra_config, save_pointcloud, should_exit_early
+from conceptgraph.utils.general_utils import ObjectClasses, find_existing_image_path, get_det_out_path, get_exp_out_path, get_stream_data_out_path, load_saved_detections, load_saved_hydra_json_config, measure_time, save_detection_results, save_hydra_config, save_pointcloud, should_exit_early
 
 from conceptgraph.slam.slam_classes import MapEdgeMapping, MapObjectList
 from conceptgraph.slam.utils import (
@@ -91,6 +92,10 @@ torch.set_grad_enabled(False)
 @hydra.main(version_base=None, config_path="../hydra_configs/", config_name="rerun_realtime_mapping")
 # @profile
 def main(cfg : DictConfig):
+    
+    app = DemoApp()
+    app.connect_to_device(dev_idx=0)
+    
     tracker = MappingTracker()
     
     orr = OptionalReRun()
@@ -108,19 +113,19 @@ def main(cfg : DictConfig):
                )
     cfg = process_cfg(cfg)
 
-    # Initialize the dataset
-    dataset = get_dataset(
-        dataconfig=cfg.dataset_config,
-        start=cfg.start,
-        end=cfg.end,
-        stride=cfg.stride,
-        basedir=cfg.dataset_root,
-        sequence=cfg.scene_id,
-        desired_height=cfg.image_height,
-        desired_width=cfg.image_width,
-        device="cpu",
-        dtype=torch.float,
-    )
+    # # Initialize the dataset
+    # dataset = get_dataset(
+    #     dataconfig=cfg.dataset_config,
+    #     start=cfg.start,
+    #     end=cfg.end,
+    #     stride=cfg.stride,
+    #     basedir=cfg.dataset_root,
+    #     sequence=cfg.scene_id,
+    #     desired_height=cfg.image_height,
+    #     desired_width=cfg.image_width,
+    #     device="cpu",
+    #     dtype=torch.float,
+    # )
     # cam_K = dataset.get_cam_K()
 
     objects = MapObjectList(device=cfg.device)
@@ -153,6 +158,8 @@ def main(cfg : DictConfig):
     run_detections = check_run_detections(cfg.force_detection, det_exp_path)
     det_exp_pkl_path = get_det_out_path(det_exp_path)
     det_exp_vis_path = get_vis_out_path(det_exp_path)
+    
+    stream_rgb_path, stream_depth_path, stream_poses_path = get_stream_data_out_path(cfg.dataset_root, cfg.scene_id)
     
     prev_adjusted_pose = None
 
@@ -187,7 +194,10 @@ def main(cfg : DictConfig):
 
     exit_early_flag = False
     counter = 0
-    for frame_idx in trange(len(dataset)):
+    frame_idx = 0
+    total_frames = 500 # adjust as you like
+    for frame_idx in trange(total_frames):
+        k=1
         tracker.curr_frame_idx = frame_idx
         counter+=1
         orr.set_time_sequence("frame", frame_idx)
@@ -198,19 +208,47 @@ def main(cfg : DictConfig):
             exit_early_flag = True
 
         # If exit early flag is set and we're not at the last frame, skip this iteration
-        if exit_early_flag and frame_idx < len(dataset) - 1:
+        if exit_early_flag and frame_idx < total_frames - 1:
             continue
+        
+        s_rgb, s_depth, s_intrinsic_mat, s_camera_pose = app.get_frame_data()
+
+        # save the rgb to the stream folder with an appropriate name
+        curr_stream_rgb_path = stream_rgb_path / f"{frame_idx}.jpg"
+        cv2.imwrite(str(curr_stream_rgb_path), s_rgb)
+        color_path = curr_stream_rgb_path
+        k=1
+        
+        if cfg.save_detections:
+        
+            # save depth to the stream folder with an appropriate name
+            curr_stream_depth_path = stream_depth_path / f"{frame_idx}.png"
+            cv2.imwrite(str(curr_stream_depth_path), s_depth)
+            
+            # save the camera pose to the stream folder with an appropriate name 
+            curr_stream_pose_path = stream_poses_path / f"{frame_idx}.npz"
+            np.savez(str(curr_stream_pose_path), s_camera_pose)
 
         # Read info about current frame from dataset
         # color image
-        color_path = Path(dataset.color_paths[frame_idx])
+        # color_path = Path(dataset.color_paths[frame_idx])
         image_original_pil = Image.open(color_path)
         # color and depth tensors, and camera instrinsics matrix
-        color_tensor, depth_tensor, intrinsics, *_ = dataset[frame_idx]
+        # color_tensor, depth_tensor, intrinsics, *_ = dataset[frame_idx]
         
+        k=1
 
+        # d_color_tensor, d_depth_tensor, d_intrinsics, *d_ = dataset[frame_idx]
+        color_tensor = torch.from_numpy(s_rgb.astype('float32')) 
+        depth_tensor = torch.from_numpy(s_depth.astype('float32'))
+        intrinsics = s_intrinsic_mat
+
+        
+        
+        k=1
+        
         # Covert to numpy and do some sanity checks
-        depth_tensor = depth_tensor[..., 0]
+        # depth_tensor = depth_tensor[..., 0]
         depth_array = depth_tensor.cpu().numpy()
         color_np = color_tensor.cpu().numpy() # (H, W, 3)
         image_rgb = (color_np).astype(np.uint8) # (H, W, 3)
@@ -258,23 +296,26 @@ def main(cfg : DictConfig):
                 given_labels = detection_class_labels
             )
 
+            ### You can turn on the VLM detections if you'd like
+            ### They're just still a little too slow for the streaming use case
             # Then, use the filtered detections and labels to annotate the image
-            annotated_image_for_vlm, labels = vis_result_for_vlm(
-                image=image, 
-                detections=filtered_detections,  # Use filtered detections here
-                labels=labels,  # Use the labels obtained from filtering
-                draw_bbox=True,
-                thickness=5,
-                text_scale=1,
-                text_thickness=2,
-                text_padding=3,
-                save_path=str(det_exp_vis_path / color_path.name).replace(".jpg", "_for_vlm_process")
-            )
-            vis_save_path_for_vlm = str((det_exp_vis_path / color_path.name).with_suffix(".jpg")).replace(".jpg", "_for_vlm.jpg")
+            # annotated_image_for_vlm, labels = vis_result_for_vlm(
+            #     image=image, 
+            #     detections=filtered_detections,  # Use filtered detections here
+            #     labels=labels,  # Use the labels obtained from filtering
+            #     draw_bbox=True,
+            #     thickness=5,
+            #     text_scale=1,
+            #     text_thickness=2,
+            #     text_padding=3,
+            #     save_path=str(det_exp_vis_path / color_path.name).replace(".jpg", "_for_vlm_process")
+            # )
+            # vis_save_path_for_vlm = str((det_exp_vis_path / color_path.name).with_suffix(".jpg")).replace(".jpg", "_for_vlm.jpg")
             
-            cv2.imwrite(str(vis_save_path_for_vlm), annotated_image_for_vlm)
-            print(f"Line 313, vis_save_path_for_vlm: {vis_save_path_for_vlm}")
-            edges = get_obj_rel_from_image_gpt4v(openai_client, vis_save_path_for_vlm, labels)
+            # cv2.imwrite(str(vis_save_path_for_vlm), annotated_image_for_vlm)
+            # print(f"Line 313, vis_save_path_for_vlm: {vis_save_path_for_vlm}")
+            # edges = get_obj_rel_from_image_gpt4v(openai_client, vis_save_path_for_vlm, labels)
+            edges = [] # for now, we're not using the VLM detections
             l=1 
             # Compute and save the clip features of detections
             image_crops, image_feats, text_feats = compute_clip_features_batched(
@@ -332,8 +373,9 @@ def main(cfg : DictConfig):
             #     raw_gobs = pickle.load(f)
 
         # get pose, this is the untrasformed pose.
-        unt_pose = dataset.poses[frame_idx]
-        unt_pose = unt_pose.cpu().numpy()
+        # d_unt_pose = dataset.poses[frame_idx]
+        unt_pose = s_camera_pose
+        # unt_pose = unt_pose.cpu().numpy()
 
         # Don't apply any transformation otherwise
         adjusted_pose = unt_pose
@@ -387,15 +429,15 @@ def main(cfg : DictConfig):
 
         for obj in obj_pcds_and_bboxes:
             if obj:
-                # obj["pcd"] = init_process_pcd(
-                #     pcd=obj["pcd"],
-                #     downsample_voxel_size=cfg["downsample_voxel_size"],
-                #     dbscan_remove_noise=cfg["dbscan_remove_noise"],
-                #     dbscan_eps=cfg["dbscan_eps"],
-                #     dbscan_min_points=cfg["dbscan_min_points"],
-                # )
+                obj["pcd"] = init_process_pcd(
+                    pcd=obj["pcd"],
+                    downsample_voxel_size=cfg["downsample_voxel_size"],
+                    dbscan_remove_noise=cfg["dbscan_remove_noise"],
+                    dbscan_eps=cfg["dbscan_eps"],
+                    dbscan_min_points=cfg["dbscan_min_points"],
+                )
                 # obj["pcd"] = obj["pcd"].remove_radius_outlier(nb_points=20, radius=0.02)[0]
-                obj["pcd"] = obj["pcd"].remove_statistical_outlier(nb_neighbors=20, std_ratio=0.5)[0]
+                # obj["pcd"] = obj["pcd"].remove_statistical_outlier(nb_neighbors=20, std_ratio=0.5)[0]
                 obj["bbox"] = get_bounding_box(
                     spatial_sim_type=cfg['spatial_sim_type'], 
                     pcd=obj["pcd"],
@@ -529,7 +571,7 @@ def main(cfg : DictConfig):
             rel_type = map_edge.rel_type
             map_edges_by_curr_obj_num.append((obj1_curr_obj_num, rel_type, obj2_curr_obj_num))
 
-        is_final_frame = frame_idx == len(dataset) - 1
+        is_final_frame = frame_idx == total_frames - 1
         if is_final_frame:
             print("Final frame detected. Performing final post-processing...")
             k=1
@@ -600,7 +642,7 @@ def main(cfg : DictConfig):
             
         orr_log_objs_pcd_and_bbox(objects, obj_classes)
         
-        orr_log_edges(objects, map_edges, obj_classes)
+        # orr_log_edges(objects, map_edges, obj_classes) # not using edges for now 
 
         # Save the objects for the current frame, if needed
         if cfg.save_objects_all_frames:

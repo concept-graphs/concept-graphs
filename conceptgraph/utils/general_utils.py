@@ -120,6 +120,19 @@ def cfg_to_dict(input_cfg):
 
     return serializable_cfg
 
+def get_stream_data_out_path(dataset_root, scene_id, make_dir=True):
+    stream_data_out_path = Path(dataset_root) / scene_id
+    stream_rgb_path = stream_data_out_path / "rgb"
+    stream_depth_path = stream_data_out_path / "depth"
+    stream_poses_path = stream_data_out_path / "poses"
+    
+    if make_dir:
+        stream_rgb_path.mkdir(parents=True, exist_ok=True)
+        stream_depth_path.mkdir(parents=True, exist_ok=True)
+        stream_poses_path.mkdir(parents=True, exist_ok=True)
+        
+    return stream_rgb_path, stream_depth_path, stream_poses_path
+
 def get_exp_out_path(dataset_root, scene_id, exp_suffix, make_dir=True):
     exp_out_path = Path(dataset_root) / scene_id / "exps" / f"{exp_suffix}"
     if make_dir:

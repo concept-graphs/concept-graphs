@@ -161,3 +161,20 @@ def rotation_matrix_to_quaternion(R):
     q[1] *= np.sign(q[1] * (R[0, 2] - R[2, 0]))
     q[2] *= np.sign(q[2] * (R[1, 0] - R[0, 1]))
     return q
+
+def quaternion_to_rotation_matrix(q):
+    """
+    Convert a quaternion into a rotation matrix.
+    
+    Parameters:
+    - q: A quaternion in the format [x, y, z, w].
+    
+    Returns:
+    - A 3x3 rotation matrix.
+    """
+    w, x, y, z = q[3], q[0], q[1], q[2]
+    return np.array([
+        [1 - 2*y**2 - 2*z**2, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
+        [2*x*y + 2*z*w, 1 - 2*x**2 - 2*z**2, 2*y*z - 2*x*w],
+        [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x**2 - 2*y**2]
+    ])

@@ -43,6 +43,8 @@ class OptionalReRun:
 
 # basically the import statement 
 orr = OptionalReRun()
+prev_logged_entities = set()
+counter = 0
 
 def orr_log_camera(intrinsics, adjusted_pose, prev_adjusted_pose, img_width, img_height, frame_idx):
     # Extract intrinsic camera parameters
@@ -120,10 +122,14 @@ def orr_log_annotated_image(color_path, det_exp_vis_path):
         )
 
 def orr_log_objs_pcd_and_bbox(objects, obj_classes):
+    global prev_logged_entities
+    global counter
+    
+    new_logged_entities = set()
         
     for obj_idx, obj in enumerate(objects):
                 
-        if obj['num_detections'] < 3:
+        if obj['num_detections'] < 1:
             continue
 
         if obj['is_background']:
@@ -147,8 +153,9 @@ def orr_log_objs_pcd_and_bbox(objects, obj_classes):
         curr_obj_inst_color = obj['inst_color']
 
         # Log point cloud data
+        rgb_pcd_entity = base_entity_path + "/rgb_pcd" + f"/{obj_label}"
         orr.log(
-            base_entity_path + "/rgb_pcd" + f"/{obj_label}",
+            rgb_pcd_entity,
             # entity_path + "/pcd", 
             orr.Points3D(
                 positions, 
@@ -160,9 +167,12 @@ def orr_log_objs_pcd_and_bbox(objects, obj_classes):
             )
         )
         
+        new_logged_entities.add(rgb_pcd_entity)
+        
         # Log point cloud data
+        seg_pcd_entity = base_entity_path + "/seg_pcd" + f"/{obj_label}"
         orr.log(
-            base_entity_path + "/seg_pcd" + f"/{obj_label}",
+            seg_pcd_entity,
             # entity_path + "/pcd", 
             orr.Points3D(
                 positions, 
@@ -174,9 +184,12 @@ def orr_log_objs_pcd_and_bbox(objects, obj_classes):
             )
         )
         
+        new_logged_entities.add(seg_pcd_entity)
+        
         # Log point cloud data
+        inst_pcd_entity = base_entity_path + "/inst_pcd" + f"/{obj_label}"
         orr.log(
-            base_entity_path + "/inst_pcd" + f"/{obj_label}",
+            inst_pcd_entity,
             # entity_path + "/pcd", 
             orr.Points3D(
                 positions, 
@@ -187,6 +200,8 @@ def orr_log_objs_pcd_and_bbox(objects, obj_classes):
                 uuid = str(obj['id']),
             )
         )
+        
+        new_logged_entities.add(inst_pcd_entity)
 
         # Assuming bbox is extracted as before
         bbox = obj['bbox']
@@ -195,8 +210,9 @@ def orr_log_objs_pcd_and_bbox(objects, obj_classes):
         # Convert rotation matrix to quaternion
         bbox_quaternion = [rotation_matrix_to_quaternion(bbox.R)]
 
+        bbox_entity = base_entity_path + "/bbox" + f"/{obj_label}"
         orr.log(
-            base_entity_path + "/bbox" + f"/{obj_label}",
+            bbox_entity,
             # entity_path + "/bbox", 
             orr.Boxes3D(
                 centers=centers, 
@@ -210,8 +226,11 @@ def orr_log_objs_pcd_and_bbox(objects, obj_classes):
             )
         )
         
+        new_logged_entities.add(bbox_entity)
+        
+        bbox_w_labels_entity = base_entity_path + "/bbox_w_labels" + f"/{obj_label}"
         orr.log(
-            base_entity_path + "/bbox_w_labels" + f"/{obj_label}",
+            bbox_w_labels_entity,
             # entity_path + "/bbox", 
             orr.Boxes3D(
                 centers=centers, 
@@ -224,9 +243,14 @@ def orr_log_objs_pcd_and_bbox(objects, obj_classes):
                 uuid = str(obj['id']),
             )
         )
+        
+        new_logged_entities.add(bbox_w_labels_entity)
+        
+        
         # {obj['class_name']}
+        bbox_w_name_entity = base_entity_path + "/bbox_w_name" + f"/{obj_label}"
         orr.log(
-            base_entity_path + "/bbox_w_name" + f"/{obj_label}",
+            bbox_w_name_entity,
             # entity_path + "/bbox", 
             orr.Boxes3D(
                 centers=centers, 
@@ -239,6 +263,27 @@ def orr_log_objs_pcd_and_bbox(objects, obj_classes):
                 uuid = str(obj['id']),
             )
         )
+        
+        new_logged_entities.add(bbox_w_name_entity)
+        
+    if counter > 0:
+        
+        # Basically, we want to clear the entities that were logged in the 
+        # previous frame but not in the current frame
+        # Because they are no longer part of the map so we don't want to 
+        # keep them in the scene
+        for entity_path in prev_logged_entities:
+            if entity_path not in new_logged_entities:
+                # print(f"Clearing {entity_path}")
+                orr.log(
+                    entity_path, 
+                    orr.Clear(recursive=True)
+                )
+        l=1
+    
+    prev_logged_entities = new_logged_entities
+    counter += 1
+        
         
 def orr_log_edges(objects, map_edges, obj_classes):
      # do the same for edges

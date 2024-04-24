@@ -120,7 +120,7 @@ def create_object_pcd(depth_array, mask, cam_K, image, obj_color=None) -> o3d.ge
 
 # @profile
 def pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10) -> o3d.geometry.PointCloud:
-    ## Remove noise via clustering
+    # Remove noise via clustering
     pcd_clusters = pcd.cluster_dbscan(
         eps=eps,
         min_points=min_points,
@@ -307,12 +307,12 @@ def merge_obj2_into_obj1(obj1, obj2, downsample_voxel_size, dbscan_remove_noise,
     obj1['clip_ft'] = F.normalize(obj1['clip_ft'], dim=0)
 
     # merge text_ft
-    obj2['text_ft'] = to_tensor(obj2['text_ft'], device)
-    obj1['text_ft'] = to_tensor(obj1['text_ft'], device)
-    obj1['text_ft'] = (obj1['text_ft'] * n_obj1_det +
-                       obj2['text_ft'] * n_obj2_det) / (
-                       n_obj1_det + n_obj2_det)
-    obj1['text_ft'] = F.normalize(obj1['text_ft'], dim=0)
+    # obj2['text_ft'] = to_tensor(obj2['text_ft'], device)
+    # obj1['text_ft'] = to_tensor(obj1['text_ft'], device)
+    # obj1['text_ft'] = (obj1['text_ft'] * n_obj1_det +
+    #                    obj2['text_ft'] * n_obj2_det) / (
+    #                    n_obj1_det + n_obj2_det)
+    # obj1['text_ft'] = F.normalize(obj1['text_ft'], dim=0)
 
     return obj1
 
@@ -503,6 +503,19 @@ def compute_overlap_matrix_general(objects_a: MapObjectList, objects_b = None, d
 
     bbox_a = objects_a.get_stacked_values_torch('bbox')
     bbox_b = objects_b.get_stacked_values_torch('bbox')
+    
+    # def compute_3d_iou_accurate_batch_safe(bbox1, bbox2):
+    #     try:
+    #         return compute_3d_iou_accurate_batch(bbox1, bbox2)
+    #     except ValueError as e:
+    #         if str(e) == "Plane vertices are not coplanar":
+    #             # Log the error or handle it in a way that's appropriate for your application
+    #             print("Non-coplanar boxes detected; returning zero IoU.")
+    #             return torch.zeros((bbox1.size(0), bbox2.size(0)))  # Return a zero IoU matrix
+    #         else:
+    #             raise  # Re-raise other unexpected exceptions
+    # ious = compute_3d_iou_accurate_batch_safe(bbox_a, bbox_b)        
+    
     ious = compute_3d_iou_accurate_batch(bbox_a, bbox_b) # (m, n)
 
 
@@ -562,11 +575,12 @@ def merge_overlap_objects(
                 to_tensor(objects[j]["clip_ft"]),
                 dim=0,
             )
-            text_sim = F.cosine_similarity(
-                to_tensor(objects[i]["text_ft"]),
-                to_tensor(objects[j]["text_ft"]),
-                dim=0,
-            )
+            # text_sim = F.cosine_similarity(
+            #     to_tensor(objects[i]["text_ft"]),
+            #     to_tensor(objects[j]["text_ft"]),
+            #     dim=0,
+            # )
+            text_sim = visual_sim
             if (
                 visual_sim > merge_visual_sim_thresh
                 and text_sim > merge_text_sim_thresh
@@ -783,7 +797,7 @@ def filter_gobs(
     for k in gobs.keys():
         if isinstance(gobs[k], str) or k == "classes":  # Captions
             continue
-        if k in ['labels', 'edges', 'detection_class_labels']:
+        if k in ['labels', 'edges', 'detection_class_labels', 'text_feats']:
             continue
         elif isinstance(gobs[k], list):
             gobs[k] = [gobs[k][i] for i in idx_to_keep]
@@ -1012,7 +1026,7 @@ def make_detection_list_from_pcd_and_gobs(
             'pcd': obj_pcds_and_bboxes[mask_idx]['pcd'],
             'bbox': obj_pcds_and_bboxes[mask_idx]['bbox'],
             'clip_ft': to_tensor(gobs['image_feats'][mask_idx]),
-            'text_ft': to_tensor(gobs['text_feats'][mask_idx]),
+            # 'text_ft': to_tensor(gobs['text_feats'][mask_idx]),
             'num_obj_in_class': num_obj_in_class,
             'curr_obj_num': tracker.total_object_count,
             'new_counter' : tracker.brand_new_counter,
@@ -1194,6 +1208,7 @@ def detections_to_obj_pcd_and_bbox(
 
         if trans_pose is not None:
             pcd.transform(trans_pose)  # Apply transformation directly to the point cloud
+            pass
 
         bbox = get_bounding_box(spatial_sim_type, pcd)
         if bbox.volume() < 1e-6:

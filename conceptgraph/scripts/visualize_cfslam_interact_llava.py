@@ -15,7 +15,7 @@ from PIL import Image
 import torch
 import torch.nn.functional as F
 import open_clip
-from gradslam.structures.pointclouds import Pointclouds
+from conceptgraph.utils.pointclouds import Pointclouds
 
 from conceptgraph.slam.slam_classes import MapObjectList
 

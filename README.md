@@ -53,6 +53,11 @@ conda activate conceptgraph
 # Install the required libraries
 pip install tyro open_clip_torch wandb h5py openai hydra-core distinctipy ultralytics supervision
 
+pip install open3d imageio natsort kornia
+
+# optional 
+pip install rerun-sdk
+
 # Install the Faiss library (CPU version should be fine), this is used for quick indexing of pointclouds for duplicate object matching and merging
 conda install -c pytorch faiss-cpu=1.7.4 mkl=2021 blas=1.0=mkl
 

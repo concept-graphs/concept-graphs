@@ -46,9 +46,9 @@ obj_min_points: 0
 obj_min_detections: 1
 
 # For merge_overlap_objects() function
-# merge_overlap_thresh: 0.7      # -1 means do not perform the merge_overlap_objects()
-# merge_visual_sim_thresh: 0.7   # Merge only if the visual similarity is larger
-# merge_text_sim_thresh: 0.7     # Merge only if the text cosine sim is larger
+
+# use_rerun: !!bool True
+# save_rerun: !!bool True
 
 hydra:
   verbose: true

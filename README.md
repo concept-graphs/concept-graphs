@@ -30,78 +30,54 @@ This repository contains the code for the ConceptGraphs project. ConceptGraphs b
 
 ## Installation
 
-You need to install three different repositories to run the code. This is because conceptgraphs depends on gradslam and chamferdist. We will refer to your chosen location for installing repositories as  `/path/to/code`. You you want to install your three repositories as follows:
+### Code
 
-```bash
-/path/to/code/conceptgraphs/
-/path/to/code/gradslam/
-/path/to/code/chamferdist/
-```
+ConceptGraphs is built using Python. We recommend using [Anaconda](https://www.anaconda.com/download) to manage your python environment. It creates a separate environment for each project, which is useful for managing dependencies and ensuring that you don't have conflicting versions of packages from other projects.
 
+**NOTE:** Sometimes certain versions of ubuntu/windows, python, pytorch and cuda may not work well together. Unfortunately this means you may need to do some trial and error to get everything working. We have included the versions of the packages we used on our machines, which ran Ubuntu 20.04.
 
-Sometimes certain versions of ubuntu/windows, python, pytorch and cuda may not work well together. Unfortunately this means you may need to do some trial and error to get everything working. We have included the versions of the packages we used on our machines, which ran Ubuntu 20.04.
-
-We also recommend using [conda](https://www.anaconda.com/download) to manage your python environment. It creates a separate environment for each project, which is useful for managing dependencies and ensuring that you don't have conflicting versions of packages from other projects.
-
-Run the following commands:
+To create your python environment, run the following commands:
 
 ```bash
 # Create the conda environment
-conda create -n conceptgraph anaconda python=3.10
+conda create -n conceptgraph python=3.10
 conda activate conceptgraph
-
-# Install the required libraries
-pip install tyro open_clip_torch wandb h5py openai hydra-core distinctipy ultralytics supervision
-
-pip install open3d imageio natsort kornia
-
-# optional 
-pip install rerun-sdk
-
-# Install the Faiss library (CPU version should be fine), this is used for quick indexing of pointclouds for duplicate object matching and merging
-conda install -c pytorch faiss-cpu=1.7.4 mkl=2021 blas=1.0=mkl
 
 ##### Install Pytorch according to your own setup #####
 # For example, if you have a GPU with CUDA 11.8 (We tested it Pytorch 2.0.1)
 conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=11.8 -c pytorch -c nvidia
 
+# Install the Faiss library (CPU version should be fine), this is used for quick indexing of pointclouds for duplicate object matching and merging
+conda install -c pytorch faiss-cpu=1.7.4 mkl=2021 blas=1.0=mkl
+
 # Install Pytorch3D (https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md)
 # conda install pytorch3d -c pytorch3d # This detects a conflict. You can use the command below, maybe with a different version
 conda install https://anaconda.org/pytorch3d/pytorch3d/0.7.4/download/linux-64/pytorch3d-0.7.4-py310_cu118_pyt201.tar.bz2
-
-# Install the gradslam package and its dependencies
-# You do not need to install them inside the conceptgraph repository folder
-# Treat them as separate packages
-# Installing chamferdist, if this fails, its not a huge deal, just move on with the installation
-cd /path/to/code/
-git clone https://github.com/krrish94/chamferdist.git
-cd chamferdist
-pip install .
-
-# Installing gradslam, make sure to checkout the conceptfusion branch
-cd /path/to/code/
-git clone https://github.com/gradslam/gradslam.git
-cd gradslam
-git checkout conceptfusion
-pip install .
 
 # We find that cuda development toolkit is the least problemantic way to install cuda. 
 # Make sure the version you install is at least close to your cuda version. 
 # See here: https://anaconda.org/conda-forge/cudatoolkit-dev
 conda install -c conda-forge cudatoolkit-dev
 
+# Install the other required libraries
+pip install tyro open_clip_torch wandb h5py openai hydra-core distinctipy ultralytics dill supervision open3d imageio natsort kornia rerun-sdk git+https://github.com/ultralytics/CLIP.git
+
 # You also need to ensure that the installed packages can find the right cuda installation.
 # You can do this by setting the CUDA_HOME environment variable.
 # You can manually set it to the python environment you are using, or set it to the conda prefix of the environment.
-export CUDA_HOME=/path/to/anaconda3/envs/conceptgraph/
+# for me its export CUDA_HOME=/home/kuwajerw/anaconda3/envs/conceptgraph
+export CUDA_HOME=/path/to/anaconda3/envs/conceptgraph
 
 # Finally install conceptgraphs
-cd /path/to/code/
+cd /path/to/code/ # wherever you want to install conceptgraphs
+# for me its /home/kuwajerw/repos/
 git clone https://github.com/concept-graphs/concept-graphs.git
 cd concept-graphs
 git checkout ali-dev
 pip install -e .
 ```
+
+### Datasets
 
 Now you will need some data to run the code on, the easiest one to use is the [Replica](https://github.com/facebookresearch/Replica-Dataset). You can install it by using the following commands:
 
@@ -113,153 +89,78 @@ wget https://cvg-data.inf.ethz.ch/nice-slam/data/Replica.zip
 unzip Replica.zip
 ```
 
+I've also uploaded a scan I took of a convenience store with a lot of objects, you can download that from Kaggle via [this link](https://www.kaggle.com/datasets/alihkw/convinience-store-recording-via-the-record3d-app/). This is a record3d file `.r3d` that we will need to preprocess before we can use it as a dataset. More on that below.
+
 And now you will need to update the paths in the configuration files in the `conceptgraph/hydra_configs` directory to point to your paths. Which is discussed below:
 
 ## Usage
 
-Conceptgraphs creates the scene graph structure in a few steps. First it **detects** objects in the scene, then the **mapping** process creates a 3D object-based pointcloud map of the scene, and then it adds the **edges** for mapped objects to build the scene graph.
+We have a lot of scripts with different features, but I reccomend starting with the `rerun_realtime_mapping.py` script, which runs the detections, builds the scene graph, and vizualizes the results all in one loop.
 
-**After you have changed the needed configuration values**, you can run a script with a simple command, for example to run detections:
+**After you have changed the needed configuration values**, you can run a script with a simple command, for example:
 
 ```bash
-python scripts/streamlined_detections.py
+# set up your config first as explained below, then
+cd /path/to/code/concept-graphs/conceptgraph/
+python slam/rerun_realtime_mapping.py
 ```
 
 
-## Setting up your configuration 
+### Setting up your configuration 
 We use the [hydra](https://hydra.cc/) package to manage the configuration, so you don't have to give it a bunch of command line arguments, just edit the  entries in the corresponding `.yaml` file in `./conceptgraph/hydra_configs/` and run the script.
 
-For example here is my `./conceptgraph/hydra_configs/streamlined_detections.yaml` file:
-
-```yaml
-defaults:
-  - base
-  - base_detections
-  - replica
-  - sam
-  - classes
-  - logging_level
-  - multirun_replica
-  - _self_
-
-stride: 50
-exp_suffix: s_detections_stride50_yes_bg_44_mr
-save_video: false
-```
-
-First the values are loaded from `base.yaml`, then `base_detections.yaml` then `replica.yaml` and so on. If there is a conflict (i.e. two files are modifying the same config parameter), the values from the earlier file are overwritten. i.e. `replica.yaml` will overwrite any confliting values in `base.yaml` and so on.
-
-Finally `_self_` is loaded, which are te values in `streamlined_detections.yaml` itself. This is where you can put your own custom values. Also feel free to add your own `.yaml` files to `./conceptgraph/hydra_configs/` and they will be loaded in the same way.
-
-To run the detections script, you need to edit the paths for the replica dataset in the `replica.yaml` file. Here is an example of my `concept-graphs/conceptgraph/hydra_configs/replica.yaml` file, you need to change these paths to point to where you have installed the replica dataset:
-
-```yaml
-dataset_root: /home/kuwajerw/new_local_data/new_replica/Replica
-dataset_config: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/conceptgraph/dataset/dataconfigs/replica/replica.yaml
-scene_id: room0
-render_camera_path: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/conceptgraph/dataset/dataconfigs/replica/replica_room0.json
-```
-
-## Running the detections script
-
-To run the script, simply run the following command from the `conceptgraph` directory:
-
-```bash
-cd /path/to/code/concept-graphs/conceptgraph/
-python /scripts/streamlined_detections.py
-```
-
-So for me it looks like this. Note that if you don't have the models installed, it should just automatically download them for you.
-
-```bash
-(cg) (base) kuwajerw@kuwajerw-ub20 [09:56:10PM 26/02/2024]:
-(main) ~/repos/new_conceptgraphs/concept-graphs/conceptgraph/
-$ python scripts/streamlined_detections.py 
-Done! Execution time of get_dataset function: 0.09 seconds
-Downloading https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8l-world.pt to 'yolov8l-world.pt'...
-100%|████████████████████| 91.2M/91.2M [00:00<00:00, 117MB/s]
-Done! Execution time of YOLO function: 1.32 seconds
-Downloading https://github.com/ultralytics/assets/releases/download/v8.1.0/mobile_sam.pt to 'mobile_sam.pt'...
-100%|████████████████████| 38.8M/38.8M [00:00<00:00, 115MB/s]
-  9%|███████████▋        | 922/2000 [02:13<02:45,  6.50it/s]
-<... detection process continues ...>
-```
-
-It will also save a copy of the configuration file in the experiment output directory, so you can see what settings were used for each run. 
-
-It will save the results in the corresponding dataset directory, in a folder called `exps`. It will name the folder with the `exp_suffix` you set in the configuration file, and also save a `config_params.json` file in that folder with the configuration parameters used for the run.
-
-Here is what the ouput of running the detections script looks like for `room0` in the `Replica` dataset:
-
-```bash
-.
-./Replica # This is the dataset root
-./Replica/room0 # This is the scene_id
-./Replica/room0/exps # This parent folder of all the results from conceptgraphs
-
-# This is the folder for the specific run, named according to the exp_suffix
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr 
-
-# This is where the visualizations are saved, they are images with bounding boxes and masks overlayed
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/vis 
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/vis/frame000000.jpg 
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/vis/frame000050.jpg
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/vis/frame000100.jpg
-... # rest of the frames
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/vis/frame001950.jpg
-
-# This is where the detection results are saved, they are in the form of pkl.gz files 
-# that contain a dictionary of the detection results
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/detections 
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/detections/frame000000.pkl.gz
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/detections/frame000050.pkl.gz
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/detections/frame000100.pkl.gz
-... # rest of the frames
-./Replica/room0/exps/s_detections_stride50_yes_bg_44_mr/detections/frame001950.pkl.gz
-```
-
-## Running the mapping script
-
-Similarly, you need to edit the `streamlined_mapping.yaml` file in the `./conceptgraph/hydra_configs/` directory to point to your paths. Note that you need to tell the mapping script which detection results to use, so you need to set the `detections_exp_suffix` to the `exp_suffix` of the detection run you want to use. So following the example above, you would set 
-```yaml
-detections_exp_suffix: s_detections_stride50_yes_bg_44_mr
-```
-in the `streamlined_mapping.yaml` file. Here is what my `streamlined_mapping.yaml` file looks like, again just for illustrative purposes. Note that it inludes a multirun mode, which is useful for automatically running conceptgraphs on multiple scenes sequentially.
+For example here is my `./conceptgraph/hydra_configs/rerun_realtime_mapping.yaml` file:
 
 ```yaml
 defaults:
   - base
   - base_mapping
   - replica
+  - sam
   - classes
   - logging_level
   - _self_
 
-detections_exp_suffix: exp_s_detections_stride50_yes_bg_44_mr
-stride: 50
-exp_suffix: s_mapping_yes_bg_multirun_49
-save_video: !!bool True
-save_objects_all_frames: !!bool True
-# merge_interval: 5
-denoise_interval: 5   
-# log_level: INFO
+detections_exp_suffix: s_detections_stride_10_run2 # just a convenient name for the detection run
+force_detection: !!bool False
+save_detections: !!bool True
 
-hydra:
-  verbose: true
-  mode: MULTIRUN
-  sweeper:
-    params:
-      scene_id: room0, office0 # 
+use_rerun: !!bool True
+save_rerun: !!bool True
+
+stride: 10
+exp_suffix: r_mapping_stride_10_run2 # just a convenient name for the mapping run
 ```
 
-Once you have set up your mapping configuration, then you can run the mapping script with the following command:
+First the values are loaded from `base.yaml`, then `base_mapping.yaml` then `replica.yaml` and so on. If there is a conflict (i.e. two files are modifying the same config parameter), the values from the earlier file are overwritten. i.e. `replica.yaml` will overwrite any confliting values in `base.yaml` and so on.
+
+Finally `_self_` is loaded, which are te values in `rerun_realtime_mapping.yaml` itself. This is where you can put your own custom values. Also feel free to add your own `.yaml` files to `./conceptgraph/hydra_configs/` and they will be loaded in the same way.
+
+#### Paths
+
+The first thing to set in your config files is where you've installed conceptgraphs and where your data is. Update this in the `./conceptgraph/hydra_configs/base_paaths.yaml` file. For me, it is:
+
+```yaml
+repo_root: /home/kuwajerw/repos/concept-graphs
+data_root: /home/kuwajerw/local_data
+```
+
+### Building the map
+
+To build the map, simply run the following command from the `conceptgraph` directory:
 
 ```bash
 cd /path/to/code/concept-graphs/conceptgraph/
-python slam/streamlined_mapping.py
+python /slam/rerun_realtime_mapping.py
 ```
 
-And here is what the output folder looks like for the mapping script:
+Note that if you don't have the models installed, it should just automatically download them for you.
+
+The results are saved in the corresponding dataset directory, in a folder called `exps`. It will name the folder with the `exp_suffix` you set in the configuration file, and also save a `config_params.json` file in that folder with the configuration parameters used for the run.
+
+**NOTE:** For convinience, the script will also automatically create a symlink `/concept-graphs/latest_pcd_save` -> `Replica/room0/exps/r_mapping_stride_10_run2/pcd_r_mapping_stride_10_run2.pkl.gz` so you can easily access the latest results by using the `latest_pcd_save` path in your argument to the visualization script.
+
+Here is what the ouput of running the mapping script looks like for `room0` in the `Replica` dataset:
 
 ```bash
 .
@@ -267,43 +168,52 @@ And here is what the output folder looks like for the mapping script:
 ./Replica/room0 # This is the scene_id
 ./Replica/room0/exps # This parent folder of all the results from conceptgraphs
 
+# This is the folder for the run's detections, named according to the exp_suffix
+./Replica/room0/exps/s_detections_stride_10_run2 
+
+# This is where the visualizations are saved, they are images with bounding boxes and masks overlayed
+./Replica/room0/exps/s_detections_stride_10_run2/vis 
+
+# This is where the detection results are saved, they are in the form of pkl.gz files 
+# that contain a dictionary of the detection results
+./Replica/room0/exps/s_detections_stride_10_run2/detections 
+
 # This is the mapping output folder for the specific run, named according to the exp_suffix
-./Replica/room0/exps/s_mapping_yes_bg_multirun_49/
+./Replica/room0/exps/r_mapping_stride_10_run2/
 # This is the saved configuration file for the run
-./Replica/room0/exps/s_mapping_yes_bg_multirun_49/config_params.json
+./Replica/room0/exps/r_mapping_stride_10_run2/config_params.json
 # We also save the configuration file of the detection run which was used 
-./Replica/room0/exps/s_mapping_yes_bg_multirun_49/config_params_detections.json
+./Replica/room0/exps/r_mapping_stride_10_run2/config_params_detections.json
 # The mapping results are saved in a pkl.gz file
-./Replica/room0/exps/s_mapping_yes_bg_multirun_49/pcd_s_mapping_yes_bg_multirun_49.pkl.gz
+./Replica/room0/exps/r_mapping_stride_10_run2/pcd_r_mapping_stride_10_run2.pkl.gz
 # The video of the mapping process is saved in a mp4 file
-./Replica/room0/exps/s_mapping_yes_bg_multirun_49/s_mapping_s_mapping_yes_bg_multirun_49.mp4
+./Replica/room0/exps/r_mapping_stride_10_run2/s_mapping_r_mapping_stride_10_run2.mp4
 # If you set save_objects_all_frames=True, then the object mapping results are saved in a folder
-./Replica/room0/exps/s_mapping_yes_bg_multirun_49//saved_obj_all_frames
+./Replica/room0/exps/r_mapping_stride_10_run2//saved_obj_all_frames
 # In the saved_obj_all_frames folder, there is a folder for each detection run used, and in each of those folders there is a pkl.gz file for each object mapping result
-./Replica/room0/exps/s_mapping_yes_bg_multirun_49/saved_obj_all_frames/det_exp_s_detections_stride50_yes_bg_44_mr
-000001.pkl.gz
-000002.pkl.gz
-000003.pkl.gz
-...
-000039.pkl.gz
-meta.pkl.gz
+./Replica/room0/exps/r_mapping_stride_10_run2/saved_obj_all_frames/det_exp_s_detections_stride_10_run2
+
 ```
 
 ## Running the visualization script
 
-This script allows you to vizluatize the map in 3D and query the map objects with text. 
+This script allows you to vizluatize the map in 3D and query the map objects with text. The `latest_pcd_save` symlink is used to point to the latest mapping results, but you can also point it to any other mapping results you want to visualize.
 
 ```bash
-cd /path/to/code/concept-graphs/conceptgraph/
-python scripts/visualize_cfslam_results.py --result_path /path/to/output.pkl.gz
+cd /path/to/code/concept-graphs
+python conceptgraph/scripts/visualize_cfslam_results.py \
+    --result_path latest_pcd_save 
 ```
 
-So for the above example this would look like 
+or if you'd like to point it to a specific result, you can just point it to the pkl.gz file directly:
 
 ```bash
-cd /path/to/code/concept-graphs/conceptgraph/
-python scripts/visualize_cfslam_results.py --result_path /path/to/code/concept-graphs/conceptgraph/Replica/room0/exps/s_mapping_yes_bg_multirun_49/pcd_s_mapping_yes_bg_multirun_49.pkl.gz
+cd /path/to/code/concept-graphs
+python conceptgraph/scripts/visualize_cfslam_results.py \
+    --result_path /path/to/data/Replica/room0/exps/r_mapping_stride_10_run2/pcd_r_mapping_stride_10_run2.pkl.gz
 ```
+
+## Searching the map with text
 
 Then in the open3d visualizer window, you can use the following key callbacks to change the visualization. 
 * Press `b` to toggle the background point clouds (wall, floor, ceiling, etc.). Only works on the ConceptGraphs-Detect.
@@ -324,6 +234,11 @@ And then we can type `cabinet` and press enter, and the point cloud will be colo
 
 That's all for now, we will keep updating this README with more information as we go.
 
+## Misc
+
+To stop a script early, you can use the `concept-graphs/conceptgraph/hydra_configs/early_exit.json` file. If you set `early_exit: true` in the file, then the script will exit early after the current iteration is finished. This is useful if you want to stop the script early, but still save the results from the current iteration.
+
+
 ## Troubleshooting
 
 Sometimes for X11 or Qt related errors, I had to put this in my bashrc file to fix it 
@@ -331,6 +246,58 @@ Sometimes for X11 or Qt related errors, I had to put this in my bashrc file to f
 ```bash
 export XKB_CONFIG_ROOT=/usr/share/X11/xkb
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

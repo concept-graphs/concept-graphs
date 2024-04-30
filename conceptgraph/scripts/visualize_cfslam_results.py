@@ -301,6 +301,10 @@ def main(args):
         probs = F.softmax(similarities, dim=0)
         max_prob_idx = torch.argmax(probs)
         similarity_colors = cmap(normalized_similarities.detach().cpu().numpy())[..., :3]
+
+        max_prob_object = objects[max_prob_idx]
+        print(f"Most probable object is at index {max_prob_idx} with class name '{max_prob_object['class_name']}'")
+        print(f"location xyz: {max_prob_object['bbox'].center}")
         
         for i in range(len(objects)):
             pcd = pcds[i]

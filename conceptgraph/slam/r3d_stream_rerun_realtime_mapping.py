@@ -289,8 +289,9 @@ def main(cfg : DictConfig):
             
             # First, filter the detections
             filtered_detections, labels = filter_detections(
+                image=image,
                 detections=curr_det, 
-                classes=obj_classes.get_classes_arr(),
+                classes=obj_classes,
                 top_x_detections=15,
                 confidence_threshold=0.1,
                 given_labels = detection_class_labels

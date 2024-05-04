@@ -11,6 +11,8 @@ stride: 50
 image_height: null # if null, it will be determined by dataconfig
 image_width: null # if null, it will be determined by dataconfig
 
+make_edges: !!bool False
+
 # Input detections
 detections_exp_suffix: exp_base_detections_suffix
 # gsa_variant: ram

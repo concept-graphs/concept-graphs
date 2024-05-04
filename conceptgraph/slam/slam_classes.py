@@ -192,6 +192,10 @@ class MapEdgeMapping:
         obj1_uuid, obj2_uuid = self.objects[obj1_index]['id'], self.objects[obj2_index]['id']
         uuid_key = (obj1_uuid, obj2_uuid)
         
+        if obj1_index == obj2_index:
+            print(f"LOOOPY EDGE DETECTED: {obj1_index} == {obj2_index}")
+            pass
+        
         if (obj1_index, obj2_index) in self.edges_by_index:
             edge = self.edges_by_index[(obj1_index, obj2_index)]
             edge.num_detections += 1
@@ -232,6 +236,43 @@ class MapEdgeMapping:
 
         self.edges_by_index = new_edges_by_index
         self.edges_by_uuid = new_edges_by_uuid
+    
+    def merge_update_indices(self, index_updates):
+        """Update all edge indices based on the new mapping after merging objects."""
+        updated_edges_by_index = {}
+        updated_edges_by_uuid = {}
+
+        # Iterate over current edges to update indices based on index_updates
+        for (obj1_index, obj2_index), curr_edge in list(self.edges_by_index.items()):
+            new_obj1_index = index_updates[obj1_index]
+            new_obj2_index = index_updates[obj2_index]
+
+            # Skip updates if either index is None (meaning the object was merged away)
+            if new_obj1_index is None or new_obj2_index is None:
+                continue
+
+            # Avoid creating a loop edge where an object points to itself
+            if new_obj1_index == new_obj2_index:
+                print(f"LOOOPY EDGE DETECTED: {new_obj1_index} == {new_obj2_index}")
+                continue
+
+            new_key = (new_obj1_index, new_obj2_index)
+            new_obj1_uuid, new_obj2_uuid = self.objects[new_obj1_index]['id'], self.objects[new_obj2_index]['id']
+            new_uuid_key = (new_obj1_uuid, new_obj2_uuid)
+            
+            # If the edge already exists after merge, update num_detections
+            if new_key in updated_edges_by_index:
+                updated_edges_by_index[new_key].num_detections += curr_edge.num_detections
+            else:
+                # Update the edge with new indices
+                curr_edge.obj1_idx = new_obj1_index
+                curr_edge.obj2_idx = new_obj2_index
+                updated_edges_by_index[new_key] = curr_edge
+                updated_edges_by_uuid[new_uuid_key] = curr_edge
+
+        # Update the class attributes with the modified edges
+        self.edges_by_index = updated_edges_by_index
+        self.edges_by_uuid = updated_edges_by_uuid
         
     def update_objects_list(self, new_objects):
         self.objects = new_objects
@@ -241,26 +282,52 @@ class MapEdgeMapping:
         updated_edges_by_index = {}
         updated_edges_by_uuid = {}
 
-        for (obj1_index, obj2_index), edge in self.edges_by_index.items():
+        for (obj1_index, obj2_index), curr_edge in self.edges_by_index.items():
             # Check if source object is part of the edge and update the edge accordingly
+            
+            # if not (source_index in (obj1_index, obj2_index)):
+            #     continue
+            
+            new_obj1_index, new_obj2_index = obj1_index, obj2_index
+            
+            if new_obj1_index == new_obj2_index: # check loop edge
+                print(f"LOOOPY EDGE DETECTED: {new_obj1_index} == {new_obj2_index}")
+                pass
+            
+            # check if edge is between source and destination
+            if source_index in (new_obj1_index, new_obj2_index) and destination_index in (new_obj1_index, new_obj2_index):
+                print(f"Edge between source and destination: {source_index} in {new_obj1_index, new_obj2_index} and {destination_index} in {new_obj1_index, new_obj2_index}")
+                pass
+                continue
+            
             if obj1_index == source_index:
-                obj1_index = destination_index
+                print(f"obj1_index matches source_index: {obj1_index} == {source_index}")
+                new_obj1_index = destination_index
+                
             if obj2_index == source_index:
-                obj2_index = destination_index
+                print(f"obj2_index matches source_index: {obj2_index} == {source_index}")
+                new_obj2_index = destination_index
+                
+            if new_obj1_index == new_obj2_index: # check loop edge
+                print(f"LOOOPY EDGE DETECTED: {new_obj1_index} == {new_obj2_index}")
+                pass
+                continue
+
 
             # Generate new edge key and UUID key
-            new_key = (obj1_index, obj2_index)
-            obj1_uuid, obj2_uuid = self.objects[obj1_index]['id'], self.objects[obj2_index]['id']
-            new_uuid_key = (obj1_uuid, obj2_uuid)
+            new_key = (new_obj1_index, new_obj2_index)
+            new_obj1_uuid, new_obj2_uuid = self.objects[new_obj1_index]['id'], self.objects[new_obj2_index]['id']
+            new_uuid_key = (new_obj1_uuid, new_obj2_uuid)
+            new_edge = MapEdge(new_obj1_index, new_obj2_index, curr_edge.rel_type, curr_edge.num_detections)
 
             # Check if the edge already exists after merge, update num_detections if it does
             if new_key in updated_edges_by_index:
-                updated_edges_by_index[new_key].num_detections += edge.num_detections
+                updated_edges_by_index[new_key].num_detections += curr_edge.num_detections
             else:
-                edge.obj1_idx = obj1_index
-                edge.obj2_idx = obj2_index
-                updated_edges_by_index[new_key] = edge
-                updated_edges_by_uuid[new_uuid_key] = edge
+                curr_edge.obj1_idx = new_obj1_index
+                curr_edge.obj2_idx = new_obj2_index
+                updated_edges_by_index[new_key] = new_edge
+                updated_edges_by_uuid[new_uuid_key] = new_edge
 
         # Update the class attributes
         self.edges_by_index = updated_edges_by_index

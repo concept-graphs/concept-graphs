@@ -16,6 +16,8 @@ detections_exp_suffix: s_detections_stride1_4 # s_detections_stride10_5 # s_dete
 force_detection: !!bool False
 save_detections: !!bool True
 
+make_edges: !!bool True
+
 # obj_min_detections: 1
 
 stride: 10
@@ -46,9 +48,8 @@ obj_min_points: 0
 obj_min_detections: 1
 
 # For merge_overlap_objects() function
-
-# use_rerun: !!bool True
-# save_rerun: !!bool True
+use_rerun: !!bool True
+save_rerun: !!bool True
 
 hydra:
   verbose: true

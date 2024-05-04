@@ -1,4 +1,5 @@
 import logging
+import os
 
 from conceptgraph.utils.general_utils import find_existing_image_path
 from conceptgraph.utils.geometry import rotation_matrix_to_quaternion
@@ -121,6 +122,13 @@ def orr_log_annotated_image(color_path, det_exp_vis_path):
             orr.ImageEncoded(path=existing_vis_save_path)
         )
 
+def orr_log_vlm_image(vlm_image_path, label=None):
+    if os.path.exists(vlm_image_path):
+        orr.log(
+            f"world/camera/vlm_image_{label}",
+            orr.ImageEncoded(path=vlm_image_path)
+        )
+        
 def orr_log_objs_pcd_and_bbox(objects, obj_classes):
     global prev_logged_entities
     global counter
@@ -286,21 +294,24 @@ def orr_log_objs_pcd_and_bbox(objects, obj_classes):
         
         
 def orr_log_edges(objects, map_edges, obj_classes):
-     # do the same for edges
+    
+    # first clear all edges 
+    orr.log(
+        "world/edges", 
+        orr.Clear(recursive=True)
+    )
+    # do the same for edges
     for map_edge_tuple in map_edges.edges_by_index.items():
         obj1_idx, obj2_idx = map_edge_tuple[0]
         map_edge = map_edge_tuple[1]
         num_dets = map_edge.num_detections
-        if num_dets < 3:
+        if num_dets <= 1:
             continue
         obj1_label = f"{objects[obj1_idx]['curr_obj_num']}"
         obj2_label = f"{objects[obj2_idx]['curr_obj_num']}"
         
         obj_1_num_dets = objects[obj1_idx]['num_detections']
         obj_2_num_dets = objects[obj2_idx]['num_detections']
-        
-        if obj_1_num_dets < 3 or obj_2_num_dets < 3:
-            continue
         
         
         rel_type = map_edge.rel_type.replace(" ", "_")

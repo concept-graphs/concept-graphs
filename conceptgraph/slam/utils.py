@@ -554,6 +554,7 @@ def merge_overlap_objects(
     dbscan_min_points: int,
     spatial_sim_type: str,
     device: str,
+    map_edges = None,
 ):
     x, y = overlap_matrix.nonzero()
     overlap_ratio = overlap_matrix[x, y]
@@ -568,6 +569,9 @@ def merge_overlap_objects(
     kept_objects = np.ones(
         len(objects), dtype=bool
     )  # Initialize all objects as 'kept' initially
+    
+    index_updates = list(range(len(objects)))  # Initialize index updates with the same indices
+
     for i, j, ratio in zip(x, y, overlap_ratio):
         if ratio > merge_overlap_thresh:
             visual_sim = F.cosine_similarity(
@@ -581,13 +585,8 @@ def merge_overlap_objects(
             #     dim=0,
             # )
             text_sim = visual_sim
-            if (
-                visual_sim > merge_visual_sim_thresh
-                and text_sim > merge_text_sim_thresh
-            ):
-                if kept_objects[
-                    j
-                ]:  # Check if the target object has not been merged into another
+            if (visual_sim > merge_visual_sim_thresh) and (text_sim > merge_text_sim_thresh):
+                if kept_objects[j]:  # Check if the target object has not been merged into another
                     # Merge object i into object j
                     objects[j] = merge_obj2_into_obj1(
                         objects[j],
@@ -602,14 +601,24 @@ def merge_overlap_objects(
                     )
                     kept_objects[i] = False  # Mark object i as 'merged'
                     merge_operations.append((i, j))  # Record this merge for edge updates 
+                    index_updates[i] = None  # Update index as merged
         else:
             break  # Stop processing if the current overlap ratio is below the threshold
+        
+    # Update remaining indices in index_updates
+    current_index = 0
+    for original_index, is_kept in enumerate(kept_objects):
+        if is_kept:
+            index_updates[original_index] = current_index
+            current_index += 1
+        else:
+            index_updates[original_index] = None
 
     # Create a new list of objects excluding those that were merged
     new_objects = [obj for obj, keep in zip(objects, kept_objects) if keep]
     objects = MapObjectList(new_objects)
 
-    return objects, merge_operations
+    return objects, index_updates
 
 # @profile
 def denoise_objects(
@@ -718,8 +727,9 @@ def merge_objects(
         downsample_voxel_size=downsample_voxel_size,
     )
     print("Before merging:", len(objects))
+    # old_objects = copy.deepcopy(objects)
     # Pass all necessary configuration parameters to merge_overlap_objects
-    objects, merge_operations = merge_overlap_objects(
+    objects, index_updates = merge_overlap_objects(
         merge_overlap_thresh=merge_overlap_thresh,
         merge_visual_sim_thresh=merge_visual_sim_thresh,
         merge_text_sim_thresh=merge_text_sim_thresh,
@@ -731,16 +741,19 @@ def merge_objects(
         dbscan_min_points=dbscan_min_points,
         spatial_sim_type=spatial_sim_type,
         device=device,
+        map_edges=map_edges,
     )
-
+    
     if map_edges is not None:
-        # Apply each recorded merge operation to the edges
-        for source_idx, dest_idx in merge_operations:
-            map_edges.merge_objects_edges(source_idx, dest_idx)
+        map_edges.merge_update_indices(index_updates)
         map_edges.update_objects_list(objects)
         print("After merging:", len(objects))
 
-    return objects
+
+    if map_edges is not None:
+        return objects, map_edges
+    else:
+        return objects
 
 
 # @profile

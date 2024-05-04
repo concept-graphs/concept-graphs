@@ -5,14 +5,16 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 # Standard library imports
 from typing import Mapping
 import uuid
-from conceptgraph.utils.optional_rerun_wrapper import OptionalReRun, orr_log_annotated_image, orr_log_camera, orr_log_depth_image, orr_log_edges, orr_log_objs_pcd_and_bbox, orr_log_rgb_image
+from conceptgraph.utils.optional_rerun_wrapper import OptionalReRun, orr_log_annotated_image, orr_log_camera, orr_log_depth_image, orr_log_edges, orr_log_objs_pcd_and_bbox, orr_log_rgb_image, orr_log_vlm_image
 from conceptgraph.utils.optional_wandb_wrapper import OptionalWandB
 from conceptgraph.utils.geometry import rotation_matrix_to_quaternion
 from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker
 from conceptgraph.utils.vlm import get_obj_rel_from_image_gpt4v, get_openai_client
 import cv2
 import os
-# import PyQt5
+
+import scipy.ndimage as ndi  # Importing for centroid calculation
+
 
 # # Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
 # pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
@@ -40,7 +42,7 @@ from omegaconf import DictConfig
 
 # Local application/library specific imports
 from conceptgraph.dataset.datasets_common import get_dataset
-from conceptgraph.utils.vis import OnlineObjectRenderer, filter_detections, save_video_from_frames, vis_result_fast_on_depth, vis_result_for_vlm
+from conceptgraph.utils.vis import OnlineObjectRenderer, annotate_for_vlm, filter_detections, plot_edges_from_vlm, save_video_from_frames, vis_result_fast_on_depth, vis_result_for_vlm
 from conceptgraph.utils.ious import (
     mask_subtract_contained
 )
@@ -220,6 +222,15 @@ def main(cfg : DictConfig):
         raw_gobs = None
         gobs = None # stands for grounded observations
         detections_path = det_exp_pkl_path / (color_path.stem + ".pkl.gz")
+        
+        vlm_image_suffix = "annotated_for_vlm.jpg"
+
+        vlm_edges_suffix = "edges_for_vlm.jpg"
+        
+        vis_save_path_for_vlm = str((det_exp_vis_path / color_path.name).with_suffix(".jpg")).replace(".jpg", vlm_image_suffix)
+        
+        vis_save_path_for_vlm_edges = str((det_exp_vis_path / color_path.name).with_suffix(".jpg")).replace(".jpg", vlm_edges_suffix)
+        
         if run_detections:
             results = None
             # opencv can't read Path objects...
@@ -236,10 +247,13 @@ def main(cfg : DictConfig):
 
             # Get Masks Using SAM or MobileSAM
             # UltraLytics SAM
-            sam_out = sam_predictor.predict(color_path, bboxes=xyxy_tensor, verbose=False)
-            masks_tensor = sam_out[0].masks.data
+            if xyxy_tensor.numel() != 0:
+                sam_out = sam_predictor.predict(color_path, bboxes=xyxy_tensor, verbose=False)
+                masks_tensor = sam_out[0].masks.data
 
-            masks_np = masks_tensor.cpu().numpy()
+                masks_np = masks_tensor.cpu().numpy()
+            else:
+                masks_np = np.empty((0, *color_tensor.shape[:2]), dtype=np.float64)
 
             # Create a detections object that we will save later
             curr_det = sv.Detections(
@@ -251,30 +265,30 @@ def main(cfg : DictConfig):
             
             # First, filter the detections
             filtered_detections, labels = filter_detections(
+                image=image,
                 detections=curr_det, 
-                classes=obj_classes.get_classes_arr(),
-                top_x_detections=15,
-                confidence_threshold=0.1,
-                given_labels = detection_class_labels
+                classes=obj_classes,
+                top_x_detections=150000,
+                confidence_threshold=0.00001,
+                given_labels = detection_class_labels,
             )
-
-            # Then, use the filtered detections and labels to annotate the image
-            annotated_image_for_vlm, labels = vis_result_for_vlm(
-                image=image, 
-                detections=filtered_detections,  # Use filtered detections here
-                labels=labels,  # Use the labels obtained from filtering
-                draw_bbox=True,
-                thickness=5,
-                text_scale=1,
-                text_thickness=2,
-                text_padding=3,
-                save_path=str(det_exp_vis_path / color_path.name).replace(".jpg", "_for_vlm_process")
-            )
-            vis_save_path_for_vlm = str((det_exp_vis_path / color_path.name).with_suffix(".jpg")).replace(".jpg", "_for_vlm.jpg")
             
-            cv2.imwrite(str(vis_save_path_for_vlm), annotated_image_for_vlm)
-            print(f"Line 313, vis_save_path_for_vlm: {vis_save_path_for_vlm}")
-            edges = get_obj_rel_from_image_gpt4v(openai_client, vis_save_path_for_vlm, labels)
+            if cfg.make_edges:
+            
+                vis_save_path_for_vlm = str((det_exp_vis_path / color_path.name).with_suffix(".jpg")).replace(".jpg", vlm_image_suffix)
+
+                annotated_image_for_vlm, sorted_indices = annotate_for_vlm(image, filtered_detections, obj_classes, labels, save_path=vis_save_path_for_vlm)
+                k=1
+
+                label_nums = [f"object {str(label.split(' ')[-1])}" for label in labels]
+                # t = labels[0].split(" ")[-1]
+                cv2.imwrite(str(vis_save_path_for_vlm), annotated_image_for_vlm)
+                print(f"Line 313, vis_save_path_for_vlm: {vis_save_path_for_vlm}")
+                edges = get_obj_rel_from_image_gpt4v(openai_client, vis_save_path_for_vlm, label_nums)
+                
+                edge_image = plot_edges_from_vlm(annotated_image_for_vlm, edges, filtered_detections, obj_classes, labels, sorted_indices, save_path=vis_save_path_for_vlm_edges)
+            else:
+                edges = []
             l=1 
             # Compute and save the clip features of detections
             image_crops, image_feats, text_feats = compute_clip_features_batched(
@@ -316,20 +330,17 @@ def main(cfg : DictConfig):
                 annotated_depth_image, labels = vis_result_fast_on_depth(depth_image_rgb, curr_det, obj_classes.get_classes_arr())
                 cv2.imwrite(str(vis_save_path).replace(".jpg", "_depth.jpg"), annotated_depth_image)
                 cv2.imwrite(str(vis_save_path).replace(".jpg", "_depth_only.jpg"), depth_image_rgb)
-                # curr_detection_name = (vis_save_path.stem + ".pkl.gz")
-                # with gzip.open(det_exp_pkl_path / curr_detection_name , "wb") as f:
-                #     pickle.dump(results, f)
-                # /home/kuwajerw/new_local_data/new_record3d/ali_apartment/apt_scan_no_smooth_processed/exps/r_detections_stride1000_2/detections/0
-
                 save_detection_results(det_exp_pkl_path / vis_save_path.stem, results)
         else:
-            # load the detections
-            # color_path = str(color_path)
-            # detections_path = str(detections_path)
-            # str(det_exp_pkl_path / color_path.stem)
-            raw_gobs = load_saved_detections(det_exp_pkl_path / color_path.stem)
-            # with gzip.open(detections_path, "rb") as f:
-            #     raw_gobs = pickle.load(f)
+            # Support current and old saving formats
+
+            if os.path.exists(det_exp_pkl_path / color_path.stem):
+                raw_gobs = load_saved_detections(det_exp_pkl_path / color_path.stem)
+            elif os.path.exists(det_exp_pkl_path / f"{int(color_path.stem):06}"):
+                raw_gobs = load_saved_detections(det_exp_pkl_path / f"{int(color_path.stem):06}")
+            else:
+                # Handle the case when the detections file does not exist
+                raw_gobs = None
 
         # get pose, this is the untrasformed pose.
         unt_pose = dataset.poses[frame_idx]
@@ -343,6 +354,10 @@ def main(cfg : DictConfig):
         orr_log_rgb_image(color_path)
         
         orr_log_annotated_image(color_path, det_exp_vis_path)
+
+        orr_log_vlm_image(vis_save_path_for_vlm)
+
+        orr_log_vlm_image(vis_save_path_for_vlm_edges, label="w_edges")
 
         orr_log_depth_image(depth_tensor)
 
@@ -482,17 +497,11 @@ def main(cfg : DictConfig):
         curr_edges_3d_by_index = []
         for edge in gobs['edges']:
             obj1_label, relation, obj2_label = edge
-            
-            # Find the 2D detection indices for obj1 and obj2 using the full label
-            obj1_index = detection_label_to_index.get(obj1_label)  # Use the full label
-            obj2_index = detection_label_to_index.get(obj2_label)  # Use the full label
+            obj1_index = int(obj1_label.split(" ")[-1])
+            obj2_index = int(obj2_label.split(" ")[-1])
             
             # check that the indices are not None
             if (obj1_index is None) or (obj2_index is None):
-                print(f"Line 623, obj1_index: {obj1_index}")
-                print(f"Line 623, obj2_index: {obj2_index}")
-                print(f"Line 624, obj1_label: {obj1_label}")
-                print(f"Line 624, obj2_label: {obj2_label}")
                 k=1
                 # sometimes gpt4v returns a relation with a class that is not in the detections
                 continue
@@ -514,6 +523,8 @@ def main(cfg : DictConfig):
         
         # Add the new edges to the map
         for (obj_1_idx, rel_type, obj_2_idx) in curr_edges_3d_by_index:
+            if obj_1_idx == obj_2_idx: # skip loop edges
+                continue
             map_edges.add_or_update_edge(obj_1_idx, obj_2_idx, rel_type)
             
         # Just making a copy of the edges by object number for viz
@@ -576,7 +587,7 @@ def main(cfg : DictConfig):
             is_final_frame,
         ):
             print(f"Line 699, Merging objects for frame {frame_idx}")
-            objects = measure_time(merge_objects)(
+            objects, map_edges = measure_time(merge_objects)(
                 merge_overlap_thresh=cfg["merge_overlap_thresh"],
                 merge_visual_sim_thresh=cfg["merge_visual_sim_thresh"],
                 merge_text_sim_thresh=cfg["merge_text_sim_thresh"],

@@ -46,8 +46,8 @@ obj_min_detections: 1
 use_rerun: !!bool True
 save_rerun: !!bool True
 
-hydra:
-  verbose: true
+# hydra:
+#   verbose: true
   # mode: MULTIRUN
   # sweeper:
   #   params:

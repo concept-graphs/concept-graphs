@@ -16,9 +16,6 @@ import os
 import scipy.ndimage as ndi  # Importing for centroid calculation
 
 
-# # Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
-# pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
-# os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
 
 
 import copy
@@ -42,16 +39,16 @@ from omegaconf import DictConfig
 
 # Local application/library specific imports
 from conceptgraph.dataset.datasets_common import get_dataset
-from conceptgraph.utils.vis import OnlineObjectRenderer, annotate_for_vlm, filter_detections, plot_edges_from_vlm, save_video_from_frames, vis_result_fast_on_depth, vis_result_for_vlm
+from conceptgraph.utils.vis import OnlineObjectRenderer, save_video_from_frames, vis_result_fast_on_depth, vis_result_for_vlm
 from conceptgraph.utils.ious import (
     mask_subtract_contained
 )
-from conceptgraph.utils.general_utils import ObjectClasses, find_existing_image_path, get_det_out_path, get_exp_out_path, load_saved_detections, load_saved_hydra_json_config, measure_time, save_detection_results, save_hydra_config, save_pointcloud, should_exit_early
+from conceptgraph.utils.general_utils import ObjectClasses, find_existing_image_path, get_det_out_path, get_exp_out_path, get_vlm_annotated_image_path, handle_rerun_saving, load_saved_detections, load_saved_hydra_json_config, make_vlm_edges, measure_time, save_detection_results, save_hydra_config, save_pointcloud, should_exit_early
 
 from conceptgraph.slam.slam_classes import MapEdgeMapping, MapObjectList
 from conceptgraph.slam.utils import (
     filter_gobs,
-    filter_objects_w_edges,
+    filter_objects,
     get_bounding_box,
     init_process_pcd,
     make_detection_list_from_pcd_and_gobs,
@@ -61,6 +58,7 @@ from conceptgraph.slam.utils import (
     detections_to_obj_pcd_and_bbox,
     prepare_objects_save_vis,
     process_cfg,
+    process_edges,
     process_pcd,
     processing_needed,
     resize_gobs,
@@ -97,13 +95,11 @@ def main(cfg : DictConfig):
     
     orr = OptionalReRun()
     orr.set_use_rerun(cfg.use_rerun)
-    
     orr.init("realtime_mapping")
     orr.spawn()
 
     owandb = OptionalWandB()
     owandb.set_use_wandb(cfg.use_wandb)
-
     owandb.init(project="concept-graphs", 
             #    entity="concept-graphs",
                 config=cfg_to_dict(cfg),
@@ -209,7 +205,6 @@ def main(cfg : DictConfig):
         image_original_pil = Image.open(color_path)
         # color and depth tensors, and camera instrinsics matrix
         color_tensor, depth_tensor, intrinsics, *_ = dataset[frame_idx]
-        
 
         # Covert to numpy and do some sanity checks
         depth_tensor = depth_tensor[..., 0]
@@ -223,13 +218,8 @@ def main(cfg : DictConfig):
         gobs = None # stands for grounded observations
         detections_path = det_exp_pkl_path / (color_path.stem + ".pkl.gz")
         
-        vlm_image_suffix = "annotated_for_vlm.jpg"
-
-        vlm_edges_suffix = "edges_for_vlm.jpg"
-        
-        vis_save_path_for_vlm = str((det_exp_vis_path / color_path.name).with_suffix(".jpg")).replace(".jpg", vlm_image_suffix)
-        
-        vis_save_path_for_vlm_edges = str((det_exp_vis_path / color_path.name).with_suffix(".jpg")).replace(".jpg", vlm_edges_suffix)
+        vis_save_path_for_vlm = get_vlm_annotated_image_path(det_exp_vis_path, color_path)
+        vis_save_path_for_vlm_edges = get_vlm_annotated_image_path(det_exp_vis_path, color_path, w_edges=True)
         
         if run_detections:
             results = None
@@ -245,6 +235,7 @@ def main(cfg : DictConfig):
             xyxy_tensor = results[0].boxes.xyxy
             xyxy_np = xyxy_tensor.cpu().numpy()
 
+            # if there are detections,
             # Get Masks Using SAM or MobileSAM
             # UltraLytics SAM
             if xyxy_tensor.numel() != 0:
@@ -263,34 +254,9 @@ def main(cfg : DictConfig):
                 mask=masks_np,
             )
             
-            # First, filter the detections
-            filtered_detections, labels = filter_detections(
-                image=image,
-                detections=curr_det, 
-                classes=obj_classes,
-                top_x_detections=150000,
-                confidence_threshold=0.00001,
-                given_labels = detection_class_labels,
-            )
+            # Make the edges
+            labels, edges, edge_image = make_vlm_edges(image, curr_det, obj_classes, detection_class_labels, det_exp_vis_path, color_path, cfg.make_edges, openai_client)
             
-            if cfg.make_edges:
-            
-                vis_save_path_for_vlm = str((det_exp_vis_path / color_path.name).with_suffix(".jpg")).replace(".jpg", vlm_image_suffix)
-
-                annotated_image_for_vlm, sorted_indices = annotate_for_vlm(image, filtered_detections, obj_classes, labels, save_path=vis_save_path_for_vlm)
-                k=1
-
-                label_nums = [f"object {str(label.split(' ')[-1])}" for label in labels]
-                # t = labels[0].split(" ")[-1]
-                cv2.imwrite(str(vis_save_path_for_vlm), annotated_image_for_vlm)
-                print(f"Line 313, vis_save_path_for_vlm: {vis_save_path_for_vlm}")
-                edges = get_obj_rel_from_image_gpt4v(openai_client, vis_save_path_for_vlm, label_nums)
-                
-                edge_image = plot_edges_from_vlm(annotated_image_for_vlm, edges, filtered_detections, obj_classes, labels, sorted_indices, save_path=vis_save_path_for_vlm_edges)
-            else:
-                edges = []
-            l=1 
-            # Compute and save the clip features of detections
             image_crops, image_feats, text_feats = compute_clip_features_batched(
                 image_rgb, curr_det, clip_model, clip_preprocess, clip_tokenizer, obj_classes.get_classes_arr(), cfg.device)
 
@@ -333,14 +299,13 @@ def main(cfg : DictConfig):
                 save_detection_results(det_exp_pkl_path / vis_save_path.stem, results)
         else:
             # Support current and old saving formats
-
             if os.path.exists(det_exp_pkl_path / color_path.stem):
                 raw_gobs = load_saved_detections(det_exp_pkl_path / color_path.stem)
             elif os.path.exists(det_exp_pkl_path / f"{int(color_path.stem):06}"):
                 raw_gobs = load_saved_detections(det_exp_pkl_path / f"{int(color_path.stem):06}")
             else:
-                # Handle the case when the detections file does not exist
-                raw_gobs = None
+                # if no detections, throw an error
+                raise FileNotFoundError(f"No detections found for frame {frame_idx}at paths \n{det_exp_pkl_path / color_path.stem} or \n{det_exp_pkl_path / f'{int(color_path.stem):06}'}.")
 
         # get pose, this is the untrasformed pose.
         unt_pose = dataset.poses[frame_idx]
@@ -352,19 +317,13 @@ def main(cfg : DictConfig):
         prev_adjusted_pose = orr_log_camera(intrinsics, adjusted_pose, prev_adjusted_pose, cfg.image_width, cfg.image_height, frame_idx)
         
         orr_log_rgb_image(color_path)
-        
         orr_log_annotated_image(color_path, det_exp_vis_path)
-
         orr_log_vlm_image(vis_save_path_for_vlm)
-
         orr_log_vlm_image(vis_save_path_for_vlm_edges, label="w_edges")
-
         orr_log_depth_image(depth_tensor)
 
         # resize the observation if needed
         resized_gobs = resize_gobs(raw_gobs, image_rgb)
-        len_resized_gobs = len(resized_gobs['mask'])
-        temp_gobs = copy.deepcopy(resized_gobs)
         # filter the observations
         filtered_gobs = filter_gobs(resized_gobs, image_rgb, 
             skip_bg=cfg.skip_bg,
@@ -373,11 +332,6 @@ def main(cfg : DictConfig):
             max_bbox_area_ratio=cfg.max_bbox_area_ratio,
             mask_conf_threshold=cfg.mask_conf_threshold,
         )
-        
-        # check and print if any detections were filtered
-        if len_resized_gobs != len(filtered_gobs['mask']):
-            print(f"=========================Filtered {len_resized_gobs - len(filtered_gobs['mask'])} detections")
-            k=1
 
         gobs = filtered_gobs
 
@@ -398,7 +352,6 @@ def main(cfg : DictConfig):
             obj_pcd_max_points=cfg.obj_pcd_max_points,
             device=cfg.device,
         )
-        k=1
 
         for obj in obj_pcds_and_bboxes:
             if obj:
@@ -433,7 +386,7 @@ def main(cfg : DictConfig):
                 })
             continue 
 
-        ## compute similarities and then merge
+        ### compute similarities and then merge
         spatial_sim = compute_spatial_similarities(
             spatial_sim_type=cfg['spatial_sim_type'], 
             detection_list=detection_list, 
@@ -455,8 +408,6 @@ def main(cfg : DictConfig):
             agg_sim=agg_sim, 
             detection_threshold=cfg['sim_threshold']  # Use the sim_threshold from the configuration
         )
-        print(f"Line 575, len(objects) before merge: {len(objects)}")
-        initial_objects_count = len(objects)
 
         # Now merge the detected objects into the existing objects based on the match indices
         objects = merge_obj_matches(
@@ -471,77 +422,11 @@ def main(cfg : DictConfig):
             device=cfg['device']
             # Note: Removed 'match_method' and 'phys_bias' as they do not appear in the provided merge function
         )
-        print(f"Line 575, len(objects) AFTER merge: {len(objects)}")
-
-
-
-        # Step 1: Generate match_indices_w_new_obj with indices for new objects
-        # Initial count of objects before processing new detections
-        new_object_count = 0  # Counter for new objects
-
-        # Create a list of match indices with new objects index instead of None
-        match_indices_w_new_obj = []
-        for match_index in match_indices:
-            if match_index is None:
-                # Assign the future index for new objects and increment the counter
-                new_obj_index = initial_objects_count + new_object_count
-                match_indices_w_new_obj.append(new_obj_index)
-                new_object_count += 1
-            else:
-                match_indices_w_new_obj.append(match_index)
-
-        # Step 2: Create a mapping from 2D detection labels to detection indices
-        detection_label_to_index = {label: index for index, label in enumerate(gobs['detection_class_labels'])}
-        
-        # Step 3: Use match_indices_w_new_obj for translating 2D edges to indices in the existing objects list
-        curr_edges_3d_by_index = []
-        for edge in gobs['edges']:
-            obj1_label, relation, obj2_label = edge
-            obj1_index = int(obj1_label.split(" ")[-1])
-            obj2_index = int(obj2_label.split(" ")[-1])
-            
-            # check that the indices are not None
-            if (obj1_index is None) or (obj2_index is None):
-                k=1
-                # sometimes gpt4v returns a relation with a class that is not in the detections
-                continue
-            
-            
-            # check that the object indices are not out of range
-            if (obj1_index is None) or (obj1_index >= len(match_indices_w_new_obj)):
-                continue
-            if (obj2_index is None) or (obj2_index >= len(match_indices_w_new_obj)):
-                continue
-            
-            # Directly map 2D detection indices to object list indices using match_indices_w_new_obj
-            obj1_objects_index = match_indices_w_new_obj[obj1_index] if obj1_index is not None else None
-            obj2_objects_index = match_indices_w_new_obj[obj2_index] if obj2_index is not None else None
-
-            curr_edges_3d_by_index.append((obj1_objects_index, relation, obj2_objects_index))
-
-        print(f"Line 624, curr_edges_3d_by_index: {curr_edges_3d_by_index}")
-        
-        # Add the new edges to the map
-        for (obj_1_idx, rel_type, obj_2_idx) in curr_edges_3d_by_index:
-            if obj_1_idx == obj_2_idx: # skip loop edges
-                continue
-            map_edges.add_or_update_edge(obj_1_idx, obj_2_idx, rel_type)
-            
-        # Just making a copy of the edges by object number for viz
-        map_edges_by_curr_obj_num = []
-        for (obj1_idx, obj2_idx), map_edge in map_edges.edges_by_index.items():
-            # check if the idxes are more than the length of the objects, if so, continue
-            if obj1_idx >= len(objects) or obj2_idx >= len(objects):
-                continue
-            obj1_curr_obj_num = objects[obj1_idx]['curr_obj_num']
-            obj2_curr_obj_num = objects[obj2_idx]['curr_obj_num']
-            rel_type = map_edge.rel_type
-            map_edges_by_curr_obj_num.append((obj1_curr_obj_num, rel_type, obj2_curr_obj_num))
+        map_edges = process_edges(match_indices, gobs, len(objects), objects, map_edges)
 
         is_final_frame = frame_idx == len(dataset) - 1
         if is_final_frame:
             print("Final frame detected. Performing final post-processing...")
-            k=1
 
         ### Perform post-processing periodically if told so
 
@@ -552,7 +437,6 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
-            print(f"Line 675, Denoising objects for frame {frame_idx}")
             objects = measure_time(denoise_objects)(
                 downsample_voxel_size=cfg['downsample_voxel_size'], 
                 dbscan_remove_noise=cfg['dbscan_remove_noise'], 
@@ -570,9 +454,7 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
-            print(f"Line 688, Filtering objects for frame {frame_idx}")
-            # objects = filter_objects(
-            objects = filter_objects_w_edges(
+            objects = filter_objects(
                 obj_min_points=cfg['obj_min_points'], 
                 obj_min_detections=cfg['obj_min_detections'], 
                 objects=objects,
@@ -586,7 +468,6 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
-            print(f"Line 699, Merging objects for frame {frame_idx}")
             objects, map_edges = measure_time(merge_objects)(
                 merge_overlap_thresh=cfg["merge_overlap_thresh"],
                 merge_visual_sim_thresh=cfg["merge_visual_sim_thresh"],
@@ -598,17 +479,10 @@ def main(cfg : DictConfig):
                 dbscan_min_points=cfg["dbscan_min_points"],
                 spatial_sim_type=cfg["spatial_sim_type"],
                 device=cfg["device"],
+                do_edges=cfg["make_edges"],
                 map_edges=map_edges
             )
-            
-
-        # what you need for the second log rerun function
-        # for full loop, objects
-        # for each object:
-        # obj['pcd'], obj['bbox']       
-            
         orr_log_objs_pcd_and_bbox(objects, obj_classes)
-        
         orr_log_edges(objects, map_edges, obj_classes)
 
         # Save the objects for the current frame, if needed
@@ -688,6 +562,18 @@ def main(cfg : DictConfig):
                 save_video_from_frames(frames, video_save_path, fps=10)
                 print("Save video to %s" % video_save_path)
 
+        if cfg.periodically_save_pcd and (counter % cfg.periodically_save_pcd_interval == 0):
+            # save the pointcloud
+            save_pointcloud(
+                exp_suffix=cfg.exp_suffix,
+                exp_out_path=exp_out_path,
+                cfg=cfg,
+                objects=objects,
+                obj_classes=obj_classes,
+                latest_pcd_filepath=cfg.latest_pcd_filepath,
+                create_symlink=True
+            )
+
         owandb.log({
             "frame_idx": frame_idx,
             "counter": counter,
@@ -710,17 +596,7 @@ def main(cfg : DictConfig):
         # print("hey")
     # LOOP OVER -----------------------------------------------------
     
-    # Save the rerun output if needed
-    if cfg.use_rerun and cfg.save_rerun:
-        temp = exp_out_path / f"rerun_{cfg.exp_suffix}.rrd"
-        print("Mapping done!")
-        print("If you want to save the rerun file, you should do so from the rerun viewer now.")
-        print("You can't yet both save and log a file in rerun.")
-        print("If you do, make a pull request!")
-        print("Also, close the viewer before continuing, it frees up a lot of RAM, which helps for saving the pointclouds.")
-        print(f"Feel free to copy and use this path below, or choose your own:\n{temp}")
-        input(f"Then press Enter to continue.")
-        k=1
+    handle_rerun_saving(cfg.use_rerun, cfg.save_rerun, cfg.exp_suffix, exp_out_path)
 
     # Save the pointcloud
     if cfg.save_pcd:

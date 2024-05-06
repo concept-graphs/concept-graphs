@@ -122,12 +122,14 @@ def orr_log_annotated_image(color_path, det_exp_vis_path):
             orr.ImageEncoded(path=existing_vis_save_path)
         )
 
-def orr_log_vlm_image(vlm_image_path, label=None):
+def orr_log_vlm_image(vlm_image_path, label=""):
     if os.path.exists(vlm_image_path):
         orr.log(
             f"world/camera/vlm_image_{label}",
             orr.ImageEncoded(path=vlm_image_path)
         )
+    else:
+        logging.warning(f"VLM image not found at path: {vlm_image_path}")
         
 def orr_log_objs_pcd_and_bbox(objects, obj_classes):
     global prev_logged_entities

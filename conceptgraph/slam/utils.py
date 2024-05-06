@@ -663,43 +663,32 @@ def denoise_objects(
     return objects
 
 # @profile
-def filter_objects_w_edges(obj_min_points: int, obj_min_detections: int, objects: MapObjectList, map_edges: MapEdgeMapping):
+def filter_objects(
+    obj_min_points: int, 
+    obj_min_detections: int, 
+    objects: MapObjectList, 
+    map_edges: MapEdgeMapping = None
+):
     print("Before filtering:", len(objects))
     objects_to_keep = []
-    new_index_map = {}  # Maps old indices to new indices
+    new_index_map = {}  # Maps old indices to new indices if edges are provided
 
     # Identify which objects to keep
     for index, obj in enumerate(objects):
         if len(obj["pcd"].points) >= obj_min_points and obj["num_detections"] >= obj_min_detections:
             objects_to_keep.append(obj)
+            if map_edges is not None:
             new_index_map[index] = len(objects_to_keep) - 1
 
     # Create a new MapObjectList from the kept objects
     new_objects = MapObjectList(objects_to_keep)
     print("After filtering:", len(new_objects))
 
-    # Update edges to reflect the new indices
-    if map_edges:
+    # Update edges if provided
+    if map_edges and new_index_map:
         map_edges.update_indices(new_index_map, new_objects)
 
     return new_objects
-
-# @profile
-def filter_objects(
-    obj_min_points: int, obj_min_detections: int, objects: MapObjectList
-):
-    print("Before filtering:", len(objects))
-    objects_to_keep = []
-    for obj in objects:
-        if (
-            len(obj["pcd"].points) >= obj_min_points
-            and obj["num_detections"] >= obj_min_detections
-        ):
-            objects_to_keep.append(obj)
-    objects = MapObjectList(objects_to_keep)
-    print("After filtering:", len(objects))
-
-    return objects
 
 # @profile
 def merge_objects(
@@ -713,6 +702,7 @@ def merge_objects(
     dbscan_min_points: int,
     spatial_sim_type: str,
     device: str,
+    do_edges: bool = False,
     map_edges = None,
 ):
     if len(objects) == 0:
@@ -744,13 +734,34 @@ def merge_objects(
         map_edges=map_edges,
     )
     
-    if map_edges is not None:
+    # print(f"MERGE OPERATIONS: \n{merge_operations}")
+    
+    # print("MERGE OPERATIONS: ")
+    # for oper in merge_operations:
+    #     obj_1_curr_num = old_objects[oper[0]]['curr_obj_num']
+    #     obj_2_curr_num = old_objects[oper[1]]['curr_obj_num']
+    #     print(f"Merge {obj_1_curr_num} into {obj_2_curr_num}")
+    
+    # k=1
+    # for i, j in zip(list(range(len(old_objects))), index_updates):
+    #     print(i,j)
+    
+    # if map_edges is not None:
+    if do_edges:
         map_edges.merge_update_indices(index_updates)
         map_edges.update_objects_list(objects)
         print("After merging:", len(objects))
 
+    # if map_edges is not None:
+    #     # Apply each recorded merge operation to the edges
+    #     for source_idx, dest_idx in merge_operations:
+    #         map_edges.merge_objects_edges(source_idx, dest_idx)
+    #     map_edges.update_objects_list(objects)
+    #     print("After merging:", len(objects))
+        
+        # now update all the edge indices using the index_updates, how?
 
-    if map_edges is not None:
+    if do_edges:
         return objects, map_edges
     else:
         return objects
@@ -1297,3 +1308,72 @@ def prepare_objects_save_vis(objects: MapObjectList, downsample_size: float=0.02
                 del objects_to_save[i][k]
                 
     return objects_to_save.to_serializable()
+
+def process_edges(match_indices, gobs, initial_objects_count, objects, map_edges):
+    # Step 1: Generate match_indices_w_new_obj with indices for new objects
+    # Initial count of objects before processing new detections
+    new_object_count = 0  # Counter for new objects
+
+    # Create a list of match indices with new objects index instead of None
+    match_indices_w_new_obj = []
+    for match_index in match_indices:
+        if match_index is None:
+            # Assign the future index for new objects and increment the counter
+            new_obj_index = initial_objects_count + new_object_count
+            match_indices_w_new_obj.append(new_obj_index)
+            new_object_count += 1
+        else:
+            match_indices_w_new_obj.append(match_index)
+
+    # Step 2: Create a mapping from 2D detection labels to detection indices
+    detection_label_to_index = {label: index for index, label in enumerate(gobs['detection_class_labels'])}
+    
+    # Step 3: Use match_indices_w_new_obj for translating 2D edges to indices in the existing objects list
+    curr_edges_3d_by_index = []
+    for edge in gobs['edges']:
+        obj1_label, relation, obj2_label = edge
+        obj1_index = int(obj1_label.split(" ")[-1])
+        obj2_index = int(obj2_label.split(" ")[-1])
+        
+        # check that the indices are not None
+        if (obj1_index is None) or (obj2_index is None):
+            k=1
+            # sometimes gpt4v returns a relation with a class that is not in the detections
+            continue
+        
+        
+        # check that the object indices are not out of range
+        if (obj1_index is None) or (obj1_index >= len(match_indices_w_new_obj)):
+            continue
+        if (obj2_index is None) or (obj2_index >= len(match_indices_w_new_obj)):
+            continue
+        
+        # Directly map 2D detection indices to object list indices using match_indices_w_new_obj
+        obj1_objects_index = match_indices_w_new_obj[obj1_index] if obj1_index is not None else None
+        obj2_objects_index = match_indices_w_new_obj[obj2_index] if obj2_index is not None else None
+        
+        if obj1_objects_index >= len(objects) or obj2_objects_index >= len(objects):
+            continue
+
+        curr_edges_3d_by_index.append((obj1_objects_index, relation, obj2_objects_index))
+
+    print(f"Line 624, curr_edges_3d_by_index: {curr_edges_3d_by_index}")
+    
+    # Add the new edges to the map
+    for (obj_1_idx, rel_type, obj_2_idx) in curr_edges_3d_by_index:
+        if obj_1_idx == obj_2_idx: # skip loop edges
+            continue
+        map_edges.add_or_update_edge(obj_1_idx, obj_2_idx, rel_type)
+        
+    # Just making a copy of the edges by object number for viz
+    map_edges_by_curr_obj_num = []
+    for (obj1_idx, obj2_idx), map_edge in map_edges.edges_by_index.items():
+        # check if the idxes are more than the length of the objects, if so, continue
+        if obj1_idx >= len(objects) or obj2_idx >= len(objects):
+            continue
+        obj1_curr_obj_num = objects[obj1_idx]['curr_obj_num']
+        obj2_curr_obj_num = objects[obj2_idx]['curr_obj_num']
+        rel_type = map_edge.rel_type
+        map_edges_by_curr_obj_num.append((obj1_curr_obj_num, rel_type, obj2_curr_obj_num))
+        
+    return map_edges

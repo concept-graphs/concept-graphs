@@ -13,6 +13,9 @@ image_width: null # if null, it will be determined by dataconfig
 
 make_edges: !!bool False
 
+periodically_save_pcd: !!bool False
+periodically_save_pcd_interval: 10
+
 # Input detections
 detections_exp_suffix: exp_base_detections_suffix
 # gsa_variant: ram

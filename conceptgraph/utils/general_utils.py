@@ -1,3 +1,4 @@
+from copy import deepcopy
 import gzip
 import json
 import logging
@@ -5,6 +6,8 @@ import os
 from pathlib import Path
 import pickle
 # from conceptgraph.utils.vis import annotate_for_vlm, filter_detections, plot_edges_from_vlm
+from conceptgraph.slam.slam_classes import MapObjectList
+from conceptgraph.slam.utils import prepare_objects_save_vis
 from conceptgraph.utils.ious import mask_subtract_contained
 import supervision as sv
 import scipy.ndimage as ndi 
@@ -37,36 +40,8 @@ class Timer:
         self.interval = self.end - self.start
         print(self.heading, self.interval)
 
-def to_numpy(tensor):
-    if isinstance(tensor, np.ndarray):
-        return tensor
-    return tensor.detach().cpu().numpy()
 
-def to_tensor(numpy_array, device=None):
-    if isinstance(numpy_array, torch.Tensor):
-        return numpy_array
-    if device is None:
-        return torch.from_numpy(numpy_array)
-    else:
-        return torch.from_numpy(numpy_array).to(device)
 
-def to_scalar(d: np.ndarray | torch.Tensor | float) -> int | float:
-    '''
-    Convert the d to a scalar
-    '''
-    if isinstance(d, float):
-        return d
-    
-    elif "numpy" in str(type(d)):
-        assert d.size == 1
-        return d.item()
-    
-    elif isinstance(d, torch.Tensor):
-        assert d.numel() == 1
-        return d.item()
-    
-    else:
-        raise TypeError(f"Invalid type for conversion: {type(d)}")
 
 def prjson(input_json, indent=0):
     """ Pretty print a json object """
@@ -740,3 +715,63 @@ def find_existing_image_path(base_path, extensions):
         if potential_path.exists():
             return potential_path
     return None
+
+def save_objects_for_frame(obj_all_frames_out_path, frame_idx, objects, obj_min_detections, adjusted_pose, color_path):
+    save_path = obj_all_frames_out_path / f"{frame_idx:06d}.pkl.gz"
+    filtered_objects = [obj for obj in objects if obj['num_detections'] >= obj_min_detections]
+    prepared_objects = prepare_objects_save_vis(MapObjectList(filtered_objects))
+    result = {
+        "camera_pose": adjusted_pose, 
+        "objects": prepared_objects,
+        "frame_idx": frame_idx,
+        "num_objects": len(filtered_objects),
+        "color_path": str(color_path)
+    }
+    with gzip.open(save_path, 'wb') as f:
+        pickle.dump(result, f)
+        
+def add_info_to_image(image, frame_idx, num_objects, color_path):
+    frame_info_text = f"Frame: {frame_idx}, Objects: {num_objects}, Path: {str(color_path)}"
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    color = (255, 0, 0)
+    thickness = 1
+    line_type = cv2.LINE_AA
+    position = (10, image.shape[0] - 10)
+    cv2.putText(image, frame_info_text, position, font, font_scale, color, thickness, line_type)
+        
+def save_video_from_frames(frames, exp_out_path, exp_suffix):
+    video_save_path = exp_out_path / (f"s_mapping_{exp_suffix}.mp4")
+    save_video_from_frames(frames, video_save_path, fps=10)
+    print(f"Save video to {video_save_path}")
+        
+def vis_render_image(objects, obj_classes, obj_renderer, image_original_pil, adjusted_pose, frames, frame_idx, color_path, obj_min_detections, class_agnostic, debug_render, is_final_frame, exp_out_path, exp_suffix):
+    filtered_objects = [
+        deepcopy(obj) for obj in objects 
+        if obj['num_detections'] >= obj_min_detections and not obj['is_background']
+    ]
+    objects_vis = MapObjectList(filtered_objects)
+
+    if class_agnostic:
+        objects_vis.color_by_instance()
+    else:
+        objects_vis.color_by_most_common_classes(obj_classes)
+
+    rendered_image, vis = obj_renderer.step(
+        image=image_original_pil,
+        gt_pose=adjusted_pose,
+        new_objects=objects_vis,
+        paint_new_objects=False,
+        return_vis_handle=debug_render,
+    )
+    
+    if rendered_image is not None:
+        add_info_to_image(rendered_image, frame_idx, len(filtered_objects), color_path)
+        frames.append((rendered_image * 255).astype(np.uint8))
+
+    if is_final_frame:
+        # Save the video
+        save_video_from_frames(frames, exp_out_path, exp_suffix)
+
+
+

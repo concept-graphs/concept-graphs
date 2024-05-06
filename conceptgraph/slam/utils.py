@@ -19,13 +19,42 @@ import torch.nn.functional as F
 import faiss
 import uuid
 
-from conceptgraph.utils.general_utils import measure_time, to_tensor, to_numpy, Timer
-from conceptgraph.slam.slam_classes import MapEdgeMapping, MapObjectList, DetectionList
+from conceptgraph.slam.slam_classes import MapEdgeMapping, MapObjectList, DetectionList, to_tensor
 
 from conceptgraph.utils.ious import compute_3d_iou, compute_3d_iou_accurate_batch, compute_iou_batch
-from conceptgraph.dataset.datasets_common import from_intrinsics_matrix
 
 tracker = MappingTracker()
+
+
+def to_scalar(d: np.ndarray | torch.Tensor | float) -> int | float:
+    '''
+    Convert the d to a scalar
+    '''
+    if isinstance(d, float):
+        return d
+    
+    elif "numpy" in str(type(d)):
+        assert d.size == 1
+        return d.item()
+    
+    elif isinstance(d, torch.Tensor):
+        assert d.numel() == 1
+        return d.item()
+    
+    else:
+        raise TypeError(f"Invalid type for conversion: {type(d)}")
+
+def from_intrinsics_matrix(K: torch.Tensor) -> tuple[float, float, float, float]:
+    '''
+    Get fx, fy, cx, cy from the intrinsics matrix
+    
+    return 4 scalars
+    '''
+    fx = to_scalar(K[0, 0])
+    fy = to_scalar(K[1, 1])
+    cx = to_scalar(K[0, 2])
+    cy = to_scalar(K[1, 2])
+    return fx, fy, cx, cy
 
 def get_classes_colors(classes):
     class_colors = {}

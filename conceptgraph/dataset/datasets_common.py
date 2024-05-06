@@ -41,7 +41,7 @@ from conceptgraph.utils.geometry import relative_transformation
 from conceptgraph.dataset.conceptgraphs_rgbd_images import RGBDImages
 
 
-from conceptgraph.utils.general_utils import to_scalar, measure_time
+from conceptgraph.utils.general_utils import measure_time
 
 
 def as_intrinsics_matrix(intrinsics):
@@ -56,17 +56,6 @@ def as_intrinsics_matrix(intrinsics):
     K[1, 2] = intrinsics[3]
     return K
 
-def from_intrinsics_matrix(K: torch.Tensor) -> tuple[float, float, float, float]:
-    '''
-    Get fx, fy, cx, cy from the intrinsics matrix
-    
-    return 4 scalars
-    '''
-    fx = to_scalar(K[0, 0])
-    fy = to_scalar(K[1, 1])
-    cx = to_scalar(K[0, 2])
-    cy = to_scalar(K[1, 2])
-    return fx, fy, cx, cy
 
 
 def readEXR_onlydepth(filename):

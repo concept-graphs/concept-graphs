@@ -3,48 +3,70 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 '''
 
 # Standard library imports
-from typing import Mapping
+import os
+import copy
 import uuid
-from conceptgraph.utils.optional_rerun_wrapper import OptionalReRun, orr_log_annotated_image, orr_log_camera, orr_log_depth_image, orr_log_edges, orr_log_objs_pcd_and_bbox, orr_log_rgb_image, orr_log_vlm_image
+from pathlib import Path
+import pickle
+import gzip
+
+# Third-party imports
+import cv2
+import numpy as np
+import scipy.ndimage as ndi
+import torch
+from PIL import Image
+from tqdm import trange
+from open3d.io import read_pinhole_camera_parameters
+import hydra
+from omegaconf import DictConfig
+import open_clip
+from ultralytics import YOLO, SAM
+import supervision as sv
+
+# Local application/library specific imports
+from conceptgraph.utils.optional_rerun_wrapper import (
+    OptionalReRun, 
+    orr_log_annotated_image, 
+    orr_log_camera, 
+    orr_log_depth_image, 
+    orr_log_edges, 
+    orr_log_objs_pcd_and_bbox, 
+    orr_log_rgb_image, 
+    orr_log_vlm_image
+)
 from conceptgraph.utils.optional_wandb_wrapper import OptionalWandB
 from conceptgraph.utils.geometry import rotation_matrix_to_quaternion
 from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker
 from conceptgraph.utils.vlm import get_obj_rel_from_image_gpt4v, get_openai_client
-import cv2
-import os
-
-import scipy.ndimage as ndi  # Importing for centroid calculation
-
-
-
-
-import copy
-# from line_profiler import profile
-import os
-from pathlib import Path
-import gzip
-import pickle
-
-# Related third party imports
-from PIL import Image
-
-import numpy as np
-# from open3d import io
-from open3d.io import read_pinhole_camera_parameters
-import torch
-from tqdm import trange
-
-import hydra
-from omegaconf import DictConfig
-
-# Local application/library specific imports
-from conceptgraph.dataset.datasets_common import get_dataset
-from conceptgraph.utils.vis import OnlineObjectRenderer, save_video_from_frames, vis_result_fast_on_depth, vis_result_for_vlm
-from conceptgraph.utils.ious import (
-    mask_subtract_contained
+from conceptgraph.utils.ious import mask_subtract_contained
+from conceptgraph.utils.general_utils import (
+    ObjectClasses, 
+    find_existing_image_path, 
+    get_det_out_path, 
+    get_exp_out_path, 
+    get_vlm_annotated_image_path, 
+    handle_rerun_saving, 
+    load_saved_detections, 
+    load_saved_hydra_json_config, 
+    make_vlm_edges, 
+    measure_time, 
+    save_detection_results, 
+    save_hydra_config, 
+    save_objects_for_frame, 
+    save_pointcloud, 
+    should_exit_early, 
+    vis_render_image
 )
-from conceptgraph.utils.general_utils import ObjectClasses, find_existing_image_path, get_det_out_path, get_exp_out_path, get_vlm_annotated_image_path, handle_rerun_saving, load_saved_detections, load_saved_hydra_json_config, make_vlm_edges, measure_time, save_detection_results, save_hydra_config, save_pointcloud, should_exit_early
-
+from conceptgraph.dataset.datasets_common import get_dataset
+from conceptgraph.utils.vis import (
+    OnlineObjectRenderer, 
+    save_video_from_frames, 
+    vis_result_fast_on_depth, 
+    vis_result_for_vlm, 
+    vis_result_fast, 
+    save_video_detections
+)
 from conceptgraph.slam.slam_classes import MapEdgeMapping, MapObjectList
 from conceptgraph.slam.utils import (
     filter_gobs,
@@ -53,7 +75,6 @@ from conceptgraph.slam.utils import (
     init_process_pcd,
     make_detection_list_from_pcd_and_gobs,
     denoise_objects,
-    filter_objects,
     merge_objects, 
     detections_to_obj_pcd_and_bbox,
     prepare_objects_save_vis,
@@ -61,7 +82,7 @@ from conceptgraph.slam.utils import (
     process_edges,
     process_pcd,
     processing_needed,
-    resize_gobs,
+    resize_gobs
 )
 from conceptgraph.slam.mapping import (
     compute_spatial_similarities,
@@ -70,19 +91,9 @@ from conceptgraph.slam.mapping import (
     match_detections_to_objects,
     merge_obj_matches
 )
-
-# Detection utils
 from conceptgraph.utils.model_utils import compute_clip_features_batched
-from conceptgraph.utils.vis import vis_result_fast
-from conceptgraph.utils.general_utils import get_vis_out_path
-from conceptgraph.utils.general_utils import cfg_to_dict
-from conceptgraph.utils.general_utils import check_run_detections
-from conceptgraph.utils.vis import save_video_detections
+from conceptgraph.utils.general_utils import get_vis_out_path, cfg_to_dict, check_run_detections
 
-from ultralytics import YOLO
-from ultralytics import SAM
-import supervision as sv
-import open_clip
 
 # Disable torch gradient computation
 torch.set_grad_enabled(False)
@@ -318,9 +329,9 @@ def main(cfg : DictConfig):
         
         orr_log_rgb_image(color_path)
         orr_log_annotated_image(color_path, det_exp_vis_path)
+        orr_log_depth_image(depth_tensor)
         orr_log_vlm_image(vis_save_path_for_vlm)
         orr_log_vlm_image(vis_save_path_for_vlm_edges, label="w_edges")
-        orr_log_depth_image(depth_tensor)
 
         # resize the observation if needed
         resized_gobs = resize_gobs(raw_gobs, image_rgb)
@@ -485,82 +496,34 @@ def main(cfg : DictConfig):
         orr_log_objs_pcd_and_bbox(objects, obj_classes)
         orr_log_edges(objects, map_edges, obj_classes)
 
-        # Save the objects for the current frame, if needed
         if cfg.save_objects_all_frames:
-            # Define the path for saving the current frame's objects
-            save_path = obj_all_frames_out_path / f"{frame_idx:06d}.pkl.gz"
-
-            # Filter objects based on minimum number of detections and prepare them for saving
-            filtered_objects = [obj for obj in objects if obj['num_detections'] >= cfg.obj_min_detections]
-            prepared_objects = prepare_objects_save_vis(MapObjectList(filtered_objects))
-
-            # Create the result dictionary with camera pose and prepared objects
-            result = { "camera_pose": adjusted_pose, "objects": prepared_objects}
-            # also save the current frame_idx, num objects, and color path in results
-            result["frame_idx"] = frame_idx
-            result["num_objects"] = len(filtered_objects)
-            result["color_path"] = str(color_path)
-            # Save the result dictionary to a compressed file
-            with gzip.open(save_path, 'wb') as f:
-                pickle.dump(result, f)
-
-        # Render the image with the filtered and colored objects
-        if cfg.vis_render:
-            # Initialize an empty list for objects meeting the criteria
-            filtered_objects = [
-                copy.deepcopy(obj) for obj in objects 
-                if obj['num_detections'] >= cfg.obj_min_detections and not obj['is_background']
-            ]
-            objects_vis = MapObjectList(filtered_objects)
-
-            # Apply coloring based on the configuration
-            if cfg.class_agnostic:
-                objects_vis.color_by_instance()
-            else:
-                objects_vis.color_by_most_common_classes(obj_classes)
-
-            # Render the image with the filtered and colored objects
-            rendered_image, vis = obj_renderer.step(
-                image=image_original_pil,
-                gt_pose=adjusted_pose,
-                new_objects=objects_vis,
-                paint_new_objects=False,
-                return_vis_handle=cfg.debug_render,
+            save_objects_for_frame(
+                obj_all_frames_out_path,
+                frame_idx,
+                objects,
+                cfg.obj_min_detections,
+                adjusted_pose,
+                color_path
             )
-
-            # If debug mode is enabled, run the visualization
-
-            # Convert the rendered image to uint8 format, if it exists
-            if rendered_image is not None:
-                rendered_image = (rendered_image * 255).astype(np.uint8)
-
-                # Define text to be added to the image
-                frame_info_text = f"Frame: {frame_idx}, Objects: {len(objects)}, Path: {str(color_path)}"
-
-                # Set the font, size, color, and thickness of the text
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                font_scale = 0.5
-                color = (255, 0, 0)  # Blue in BGR
-                thickness = 1
-                line_type = cv2.LINE_AA
-
-                # Get text size for positioning
-                text_size, _ = cv2.getTextSize(frame_info_text, font, font_scale, thickness)
-
-                # Set position for the text (bottom-left corner)
-                position = (10, rendered_image.shape[0] - 10)  # 10 pixels from the bottom-left corner
-
-                # Add the text to the image
-                cv2.putText(rendered_image, frame_info_text, position, font, font_scale, color, thickness, line_type)
-
-                frames.append(rendered_image)
-
-            if is_final_frame:
-                # Save frames as a mp4 video
-                frames = np.stack(frames)
-                video_save_path = exp_out_path / (f"s_mapping_{cfg.exp_suffix}.mp4")
-                save_video_from_frames(frames, video_save_path, fps=10)
-                print("Save video to %s" % video_save_path)
+        
+        if cfg.vis_render:
+            # render a frame, if needed (not really used anymore since rerun)
+            vis_render_image(
+                objects,
+                obj_classes,
+                obj_renderer,
+                image_original_pil,
+                adjusted_pose,
+                frames,
+                frame_idx,
+                color_path,
+                cfg.obj_min_detections,
+                cfg.class_agnostic,
+                cfg.debug_render,
+                is_final_frame,
+                cfg.exp_out_path,
+                cfg.exp_suffix,
+            )
 
         if cfg.periodically_save_pcd and (counter % cfg.periodically_save_pcd_interval == 0):
             # save the pointcloud
@@ -593,7 +556,6 @@ def main(cfg : DictConfig):
                 "exit_early_flag": exit_early_flag,
                 "is_final_frame": is_final_frame,
                 })
-        # print("hey")
     # LOOP OVER -----------------------------------------------------
     
     handle_rerun_saving(cfg.use_rerun, cfg.save_rerun, cfg.exp_suffix, exp_out_path)

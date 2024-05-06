@@ -7,7 +7,18 @@ import torch.nn.functional as F
 import numpy as np
 import open3d as o3d
 
-from conceptgraph.utils.general_utils import to_numpy, to_tensor
+def to_numpy(tensor):
+    if isinstance(tensor, np.ndarray):
+        return tensor
+    return tensor.detach().cpu().numpy()
+
+def to_tensor(numpy_array, device=None):
+    if isinstance(numpy_array, torch.Tensor):
+        return numpy_array
+    if device is None:
+        return torch.from_numpy(numpy_array)
+    else:
+        return torch.from_numpy(numpy_array).to(device)
 
 class DetectionList(list):
     def get_values(self, key, idx:int=None):

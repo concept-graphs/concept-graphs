@@ -140,7 +140,7 @@ def check_run_detections(force_detection, det_exp_path):
     if not det_exp_path.exists():
         return True
     return False
-    
+
 def mask_iou(mask1, mask2):
     intersection = np.logical_and(mask1, mask2).sum()
     union = np.logical_or(mask1, mask2).sum()
@@ -437,6 +437,7 @@ def make_vlm_edges(image, curr_det, obj_classes, detection_class_labels, det_exp
     )
     
     edges = []
+    edge_image = None
     if make_edges_flag:
         vis_save_path_for_vlm = get_vlm_annotated_image_path(det_exp_vis_path, color_path)
         vis_save_path_for_vlm_edges = get_vlm_annotated_image_path(det_exp_vis_path, color_path, w_edges=True)

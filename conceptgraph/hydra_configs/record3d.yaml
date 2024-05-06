@@ -1,7 +1,7 @@
 defaults:
   - base_paths
   
-dataset_root: ${data_root}/new_record3d/ali_apartment
-dataset_config: ${data_root}/new_record3d/ali_apartment/co_store_processed/dataconfig.yaml
+dataset_root: ${data_root}/record3d_scans
 scene_id: co_store_processed
+dataset_config: ${dataset_root}/${scene_id}/dataconfig.yaml
 render_camera_path: ${repo_root}/conceptgraph/dataset/dataconfigs/record3d/record_3d_camera.json

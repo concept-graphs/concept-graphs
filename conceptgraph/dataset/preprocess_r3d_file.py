@@ -18,11 +18,12 @@ from scipy.spatial.transform import Rotation
 from tqdm import tqdm, trange
 from typing import List, Tuple, Union
 from natsort import natsorted
+from pathlib import Path
 
 @dataclass
 class ProgramArgs:
-    datapath: str = "/home/kuwajerw/new_local_data/new_record3d/ali_apartment/apt_scan_no_smooth"
-    output_dir: str = None  # Optional, set dynamically if not provided
+    datapath = "/home/kuwajerw/new_local_data/new_record3d/ali_apartment/co_store"
+    output_dir = None  # Optional, set dynamically if not provided
 
 desired_width = 1440
 desired_height = 1920
@@ -156,9 +157,12 @@ def main():
     with open(os.path.join(args.datapath, "metadata"), "r") as f:
         metadata = json.load(f)
         
-        # If output_dir is not specified, set it to a "preprocessed" folder inside datapath
+    # If output_dir is not specified, set it to a "preprocessed" folder inside datapath parent folder
     if args.output_dir is None:
-        args.output_dir = os.path.join(args.datapath, "preprocessed_highres_new3")
+        datapath = Path(args.datapath)
+        args.output_dir = str(datapath.parent / (datapath.name + "_preprocessed"))
+    
+    print(f"Preprocessing Record3D data from \n{args.datapath} to \n{args.output_dir}")
 
     original_width, original_height = 192, 256 # Original resolution for scaling intrinsics
     poses = get_poses(metadata)

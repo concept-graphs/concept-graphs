@@ -1,0 +1,66 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Current File with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": "${command:pickArgs}",
+            "justMyCode": false
+        },
+        {
+            "name": "Detections Only",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/conceptgraph/scripts/streamlined_detections.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Realtime Mapping",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/conceptgraph/slam/rerun_realtime_mapping.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "iPhone Record3D Stream Rerun Realtime Mapping",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/conceptgraph/slam/r3d_stream_rerun_realtime_mapping.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Visualize & Query Map",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/conceptgraph/scripts/visualize_cfslam_results.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "args": [
+                "--result_path",
+                "${workspaceFolder}/latest_pcd_save" // change this to the path of the pcd file you want to visualize
+            ],
+            "justMyCode": false
+        },
+
+    ]
+}

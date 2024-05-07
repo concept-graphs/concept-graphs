@@ -79,6 +79,7 @@ pip install -e .
 
 ### Datasets
 
+#### Replica 
 Now you will need some data to run the code on, the easiest one to use is the [Replica](https://github.com/facebookresearch/Replica-Dataset). You can install it by using the following commands:
 
 ```bash
@@ -89,6 +90,7 @@ wget https://cvg-data.inf.ethz.ch/nice-slam/data/Replica.zip
 unzip Replica.zip
 ```
 
+#### iPhone scan via Record 3D app (r3d file) of a convenience store aisle
 I've also uploaded a scan I took of a convenience store with a lot of objects, you can download that from Kaggle via [this link](https://www.kaggle.com/datasets/alihkw/convinience-store-recording-via-the-record3d-app/). This is a record3d file `.r3d` that we will need to preprocess before we can use it as a dataset. More on that below.
 
 And now you will need to update the paths in the configuration files in the `conceptgraph/hydra_configs` directory to point to your paths. Which is discussed below:

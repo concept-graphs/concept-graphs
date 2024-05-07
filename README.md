@@ -249,7 +249,8 @@ Then you want to use the `concept-graphs/conceptgraph/dataset/preprocess_r3d_fil
 
 ```
 class ProgramArgs:
-    datapath = "/home/kuwajerw/local_data/record3d_scans/co_store" # this folder has the metadata folder and the rgb folder etc inside it
+    # this folder contains the metadata folder and the rgb folder etc inside it
+    datapath = "/home/kuwajerw/local_data/record3d_scans/co_store" 
 ```
 
 Let that script run, and now you'll have a folder called `/home/kuwajerw/local_data/record3d_scans/co_store_preprocessed` which you can use with ConceptGraphs, for which you can follow the same instructions as the Replica dataset.

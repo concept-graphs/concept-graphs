@@ -60,7 +60,7 @@ conda install https://anaconda.org/pytorch3d/pytorch3d/0.7.4/download/linux-64/p
 conda install -c conda-forge cudatoolkit-dev
 
 # Install the other required libraries
-pip install tyro open_clip_torch wandb h5py openai hydra-core distinctipy ultralytics dill supervision open3d imageio natsort kornia rerun-sdk git+https://github.com/ultralytics/CLIP.git
+pip install tyro open_clip_torch wandb h5py openai hydra-core distinctipy ultralytics dill supervision open3d imageio natsort kornia rerun-sdk pyliblzfse pypng git+https://github.com/ultralytics/CLIP.git
 
 # You also need to ensure that the installed packages can find the right cuda installation.
 # You can do this by setting the CUDA_HOME environment variable.

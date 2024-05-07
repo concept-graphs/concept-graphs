@@ -30,9 +30,115 @@ This repository contains the code for the ConceptGraphs project. ConceptGraphs b
 
 ## Getting Started Video Tutorial 
 
-This Youtube video below covers the README as of May 7, 2024. In it, I start with a blank ubuntu 20.04, and setup ConceptGraphs, and make a map using the replica dataset and an iPhone scan. Also covers the direct streaming option!
+This 1.5 hours long Youtube video is detailed getting started tutorial covering the README below as of May 7, 2024. In it, I start with a blank ubuntu 20.04, and setup ConceptGraphs, and make a map using the replica dataset and an iPhone scan. Also covers the direct streaming option! I decided to be extra detailed just in case, so feel free to skip over / through the parts that are too slow for you.
 
 [![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/56jEFyrqqpo/0.jpg)](https://www.youtube.com/watch?v=56jEFyrqqpo)
+
+<details >
+<summary>Video Chapters (Dropdown) </summary>
+<br>
+  
+0:00 Welcome Introduction
+
+1:09 Tutorial Starts
+
+1:58 Download Dataset
+
+3:17 Conda Env Setup Starts
+
+9:32 Setting CUDA_HOME env variable
+
+14:18 Install ali-dev ConceptGraphs into conda env
+
+16:39 Build map w Replica Dataset starts
+
+18:38 Weird Indent Error
+
+19:27 Config Setup and Related Errors Explanation starts
+
+21:13 Hydra Config Composition explained
+
+25:00 Setting repo_root and data_root in base_paths YAML
+
+27:25 Initial Overview of mapping script
+
+29:02 Changing SAM to MobileSAM
+
+30:27 Commenting out openai api for now
+
+31:48 Overview of changes so far
+
+32:09 Initial look at Rerun window
+
+33:44 Overview of changes so far part 2
+
+35:01 Stopping the map building early explained
+
+35:32 Saving the Rerun data
+
+37:52 Saving the map
+
+38:33 last_pcd_save Symbolic Link Explained
+
+39:42 Exploring the Finished Experiment Folder
+
+42:40 Saved param file for the Experiment
+
+45:00 Searching the map with natural language queries
+
+48:42 Overview of changes so far part 3
+
+50:10 Reusing detections
+
+52:21 Showing off Rerun Visualization features
+
+54:43 Incomplete Dataset Reuse Issue
+
+55:38 Summary and Recap So far
+
+56:19 Using an iPhone as RGB-D sensor starts
+
+56:46 Record3D app explained
+
+57:49 Setting up and extracting r3d file dataset
+
+59:31 Preprocessing extracted r3d dataset 
+
+1:01:42 Missing dependencies fix 
+
+1:04:31 Building and saving  map with iPhone dataset
+
+1:09:41 Searching the co_store map with natural language queries
+
+1:10:56 Streaming data directly from iPhone explanation starts 
+
+1:14:10 Installing record3D git repo and cmake
+
+1:18:29 setting up OpenAI API key env variable  
+
+1:20:03 Streaming directly from iPhone working 
+
+1:22:21 Searching the streamed iPhone map with natural language queries
+
+1:23:41 Edges explanation starts
+
+1:24:58 Building a map with edges and using the VSCode Debugger starts
+
+1:25:22 Explaining the VSCode launch.json debug config
+
+1:27:21 Building a map with Edges
+
+1:29:17 Summary and recap of video and changes so far
+
+1:30:28 High level overview of main mapping script
+
+1:35:19 How to use the VSCode debugger
+
+1:37:12 Summary and recap of video and changes so far part 2
+
+1:37:49 Outro and goodbye
+
+</details>
 
 
 ## Installation
@@ -259,7 +365,21 @@ Let that script run, and now you'll have a folder called `/home/kuwajerw/local_d
 
 ## Streaming the map directly from an iPhone as you're doing the scan
 
-If you'd like to skip the dataset making process and build the map in near real time as you're recording the scan, you can use the `concept-graphs/conceptgraph/slam/r3d_stream_rerun_realtime_mapping.py` script for that, it's also covered in the getting started video. Simply use the [USB streaming option](https://record3d.app/features) in the Record3D app, and then run the `r3d_stream_rerun_realtime_mapping.py` script to start building the map immediately.
+If you'd like to skip the dataset making process and build the map in near real time as you're recording the scan, you can use the `concept-graphs/conceptgraph/slam/r3d_stream_rerun_realtime_mapping.py` script for that, it's also covered in the getting started video. First you need to setup the record3D git repo, which requires installing cmake. After that, simply use the [USB streaming option](https://record3d.app/features) in the Record3D app, and then run the `r3d_stream_rerun_realtime_mapping.py` script to start building the map immediately. So that's:
+```
+sudo apt install cmake
+```
+and then, with your `conceptgraph` conda environment active, run these commands from the record3D github [README file](https://github.com/marek-simonik/record3d?tab=readme-ov-file#python)
+```
+git clone https://github.com/marek-simonik/record3d
+cd record3d
+python setup.py install
+```
+and now you can run the `r3d_stream_rerun_realtime_mapping.py` same as the previous scripts. Of course, you will have to have the iPhone streaming via USB to your computer at the same time when you run the script.
+```bash
+cd /path/to/code/concept-graphs/conceptgraph/
+python /slam/r3d_stream_rerun_realtime_mapping.py
+```
 
 ## Debugging
 

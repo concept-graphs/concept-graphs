@@ -241,6 +241,11 @@ def plot_images_with_captions(images, captions, confidences, low_confidences, ma
     plt.savefig(savedir / f"{idx_obj}.png")
     plt.close()
 
+def save_image_list(idx_obj, cache_path, image_list):
+    savedir_images_obj = cache_path / f"{idx_obj}"
+    savedir_images_obj.mkdir(exist_ok=True, parents=True)
+    for idx, image in enumerate(image_list):
+        image.save(savedir_images_obj / f"{idx}.png")
 
 
 def extract_node_captions(args):
@@ -294,6 +299,10 @@ def extract_node_captions(args):
     savedir_captions.mkdir(exist_ok=True, parents=True)
     savedir_debug = Path(args.cachedir) / "cfslam_captions_llava_debug"
     savedir_debug.mkdir(exist_ok=True, parents=True)
+    savedir_images = Path(args.cachedir) / "images" / "raw"
+    savedir_images.mkdir(exist_ok=True, parents=True)
+    savedir_images_modified = Path(args.cachedir) / "images" / "processed"
+    savedir_images_modified.mkdir(exist_ok=True, parents=True)
 
     caption_dict_list = []
 
@@ -307,6 +316,7 @@ def extract_node_captions(args):
         low_confidences = []
         
         image_list = []
+        image_modified_list = []
         caption_list = []
         confidences_list = []
         low_confidences_list = []
@@ -362,6 +372,7 @@ def extract_node_captions(args):
             # For the LLava debug folder
             conf_value = conf[idx_det]
             image_list.append(image_crop)
+            image_modified_list.append(image_crop_modified)
             caption_list.append(outputs)
             confidences_list.append(conf_value)
             low_confidences_list.append(low_confidences[-1])
@@ -385,6 +396,11 @@ def extract_node_captions(args):
         # Again for the LLava debug folder
         if len(image_list) > 0:
             plot_images_with_captions(image_list, caption_list, confidences_list, low_confidences_list, mask_list, savedir_debug, idx_obj)
+
+        # Save images
+        save_image_list(idx_obj, savedir_images, image_list)
+        save_image_list(idx_obj, savedir_images_modified, image_modified_list)
+
 
     # Save the captions
     # Remove the "The central object in the image is " prefix from 
@@ -458,7 +474,7 @@ def refine_node_captions(args):
         curr_chat_messages.append({"role": "user", "content": preds})
         chat_completion = openai.ChatCompletion.create(
             # model="gpt-3.5-turbo",
-            model="gpt-4",
+            model="gpt-4-turbo-preview",
             messages=curr_chat_messages,
             timeout=TIMEOUT,  # Timeout in seconds
         )

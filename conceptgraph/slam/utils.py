@@ -19,13 +19,42 @@ import torch.nn.functional as F
 import faiss
 import uuid
 
-from conceptgraph.utils.general_utils import measure_time, to_tensor, to_numpy, Timer
-from conceptgraph.slam.slam_classes import MapObjectList, DetectionList
+from conceptgraph.slam.slam_classes import MapEdgeMapping, MapObjectList, DetectionList, to_tensor
 
 from conceptgraph.utils.ious import compute_3d_iou, compute_3d_iou_accurate_batch, compute_iou_batch
-from conceptgraph.dataset.datasets_common import from_intrinsics_matrix
 
 tracker = MappingTracker()
+
+
+def to_scalar(d: np.ndarray | torch.Tensor | float) -> int | float:
+    '''
+    Convert the d to a scalar
+    '''
+    if isinstance(d, float):
+        return d
+    
+    elif "numpy" in str(type(d)):
+        assert d.size == 1
+        return d.item()
+    
+    elif isinstance(d, torch.Tensor):
+        assert d.numel() == 1
+        return d.item()
+    
+    else:
+        raise TypeError(f"Invalid type for conversion: {type(d)}")
+
+def from_intrinsics_matrix(K: torch.Tensor) -> tuple[float, float, float, float]:
+    '''
+    Get fx, fy, cx, cy from the intrinsics matrix
+    
+    return 4 scalars
+    '''
+    fx = to_scalar(K[0, 0])
+    fy = to_scalar(K[1, 1])
+    cx = to_scalar(K[0, 2])
+    cy = to_scalar(K[1, 2])
+    return fx, fy, cx, cy
 
 def get_classes_colors(classes):
     class_colors = {}
@@ -120,7 +149,7 @@ def create_object_pcd(depth_array, mask, cam_K, image, obj_color=None) -> o3d.ge
 
 # @profile
 def pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10) -> o3d.geometry.PointCloud:
-    ## Remove noise via clustering
+    # Remove noise via clustering
     pcd_clusters = pcd.cluster_dbscan(
         eps=eps,
         min_points=min_points,
@@ -223,11 +252,11 @@ def process_pcd(pcd, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbs
     
     if dbscan_remove_noise and run_dbscan:
         pass
-        # pcd = pcd_denoise_dbscan(
-        #     pcd, 
-        #     eps=dbscan_eps, 
-        #     min_points=dbscan_min_points
-        # )
+        pcd = pcd_denoise_dbscan(
+            pcd, 
+            eps=dbscan_eps, 
+            min_points=dbscan_min_points
+        )
         
     return pcd
 
@@ -246,54 +275,74 @@ def get_bounding_box(spatial_sim_type, pcd):
 def merge_obj2_into_obj1(obj1, obj2, downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, spatial_sim_type, device, run_dbscan=True):
 
     '''
-    Merge the new object to the old object
-    This operation is done in-place
+    Merges obj2 into obj1 with structured attribute handling, including explicit checks for unhandled keys.
+
+    Parameters:
+    - obj1, obj2: Objects to merge.
+    - downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, spatial_sim_type: Parameters for point cloud processing.
+    - device: Computation device.
+    - run_dbscan: Whether to run DBSCAN for noise removal.
+
+    Returns:
+    - obj1: Updated object after merging.
     '''
     global tracker
     
     tracker.track_merge(obj1, obj2)
     
+    # Attributes to be explicitly handled
+    extend_attributes = ['image_idx', 'mask_idx', 'color_path', 'class_id', 'mask', 'xyxy', 'conf', 'contain_number']
+    add_attributes = ['num_detections', 'num_obj_in_class']
+    skip_attributes = ['id', 'class_name', 'is_background', 'new_counter', 'curr_obj_num', 'inst_color']  # 'inst_color' just keeps obj1's
+    custom_handled = ['pcd', 'bbox', 'clip_ft', 'text_ft', 'n_points']
+
+    # Check for unhandled keys and throw an error if there are
+    all_handled_keys = set(extend_attributes + add_attributes + skip_attributes + custom_handled)
+    unhandled_keys = set(obj2.keys()) - all_handled_keys
+    if unhandled_keys:
+        raise ValueError(f"Unhandled keys detected in obj2: {unhandled_keys}. Please update the merge function to handle these attributes.")
+
+    # Process extend and add attributes
+    for attr in extend_attributes:
+        if attr in obj1 and attr in obj2:
+            obj1[attr].extend(obj2[attr])
+    
+    for attr in add_attributes:
+        if attr in obj1 and attr in obj2:
+            obj1[attr] += obj2[attr]
+
+    # Custom handling for 'pcd', 'bbox', 'clip_ft', and 'text_ft'
     n_obj1_det = obj1['num_detections']
     n_obj2_det = obj2['num_detections']
     
-    for k in obj1.keys():
-        if k in ['class_name', 'id', 'curr_obj_num','new_counter', 'num_obj_in_class']:
-            continue
-        if k in ['caption']:
-            # Here we need to merge two dictionaries and adjust the key of the second one
-            for k2, v2 in obj2['caption'].items():
-                obj1['caption'][k2 + n_obj1_det] = v2
-        elif k not in ['pcd', 'bbox', 'clip_ft', "text_ft", "class_name"]:
-            if isinstance(obj1[k], list) or isinstance(obj1[k], int):
-                obj1[k] += obj2[k]
-            elif k == "inst_color":
-                obj1[k] = obj1[k] # Keep the initial instance color
-            else:
-                # TODO: handle other types if needed in the future
-                raise NotImplementedError
-        else: # pcd, bbox, clip_ft, text_ft are handled below
-            continue
+        # Handling 'caption'
+    if 'caption' in obj1 and 'caption' in obj2:
+        n_obj1_det = obj1['num_detections']
+        for key, value in obj2['caption'].items():
+            obj1['caption'][key + n_obj1_det] = value
 
     # merge pcd and bbox
     obj1['pcd'] += obj2['pcd']
     obj1['pcd'] = process_pcd(obj1['pcd'], downsample_voxel_size, dbscan_remove_noise, dbscan_eps, dbscan_min_points, run_dbscan)
+    # update n_points
+    obj1['n_points'] = len(np.asarray(obj1['pcd'].points))
+
+    # Update 'bbox'
     obj1['bbox'] = get_bounding_box(spatial_sim_type, obj1['pcd'])
-    obj1['bbox'].color = [0,1,0]
-    
-    # merge clip ft
-    obj1['clip_ft'] = (obj1['clip_ft'] * n_obj1_det +
-                       obj2['clip_ft'] * n_obj2_det) / (
-                       n_obj1_det + n_obj2_det)
+    obj1['bbox'].color = [0, 1, 0]
+
+    # Merge and normalize 'clip_ft'
+    obj1['clip_ft'] = (obj1['clip_ft'] * n_obj1_det + obj2['clip_ft'] * n_obj2_det) / (n_obj1_det + n_obj2_det)
     obj1['clip_ft'] = F.normalize(obj1['clip_ft'], dim=0)
 
     # merge text_ft
-    obj2['text_ft'] = to_tensor(obj2['text_ft'], device)
-    obj1['text_ft'] = to_tensor(obj1['text_ft'], device)
-    obj1['text_ft'] = (obj1['text_ft'] * n_obj1_det +
-                       obj2['text_ft'] * n_obj2_det) / (
-                       n_obj1_det + n_obj2_det)
-    obj1['text_ft'] = F.normalize(obj1['text_ft'], dim=0)
-    
+    # obj2['text_ft'] = to_tensor(obj2['text_ft'], device)
+    # obj1['text_ft'] = to_tensor(obj1['text_ft'], device)
+    # obj1['text_ft'] = (obj1['text_ft'] * n_obj1_det +
+    #                    obj2['text_ft'] * n_obj2_det) / (
+    #                    n_obj1_det + n_obj2_det)
+    # obj1['text_ft'] = F.normalize(obj1['text_ft'], dim=0)
+
     return obj1
 
 def compute_overlap_matrix(objects: MapObjectList, downsample_voxel_size):
@@ -483,6 +532,19 @@ def compute_overlap_matrix_general(objects_a: MapObjectList, objects_b = None, d
 
     bbox_a = objects_a.get_stacked_values_torch('bbox')
     bbox_b = objects_b.get_stacked_values_torch('bbox')
+    
+    # def compute_3d_iou_accurate_batch_safe(bbox1, bbox2):
+    #     try:
+    #         return compute_3d_iou_accurate_batch(bbox1, bbox2)
+    #     except ValueError as e:
+    #         if str(e) == "Plane vertices are not coplanar":
+    #             # Log the error or handle it in a way that's appropriate for your application
+    #             print("Non-coplanar boxes detected; returning zero IoU.")
+    #             return torch.zeros((bbox1.size(0), bbox2.size(0)))  # Return a zero IoU matrix
+    #         else:
+    #             raise  # Re-raise other unexpected exceptions
+    # ious = compute_3d_iou_accurate_batch_safe(bbox_a, bbox_b)        
+    
     ious = compute_3d_iou_accurate_batch(bbox_a, bbox_b) # (m, n)
 
 
@@ -521,6 +583,7 @@ def merge_overlap_objects(
     dbscan_min_points: int,
     spatial_sim_type: str,
     device: str,
+    map_edges = None,
 ):
     x, y = overlap_matrix.nonzero()
     overlap_ratio = overlap_matrix[x, y]
@@ -530,10 +593,14 @@ def merge_overlap_objects(
     x = x[sort]
     y = y[sort]
     overlap_ratio = overlap_ratio[sort]
-
+    
+    merge_operations = []  # to track merge operations
     kept_objects = np.ones(
         len(objects), dtype=bool
     )  # Initialize all objects as 'kept' initially
+    
+    index_updates = list(range(len(objects)))  # Initialize index updates with the same indices
+
     for i, j, ratio in zip(x, y, overlap_ratio):
         if ratio > merge_overlap_thresh:
             visual_sim = F.cosine_similarity(
@@ -541,18 +608,14 @@ def merge_overlap_objects(
                 to_tensor(objects[j]["clip_ft"]),
                 dim=0,
             )
-            text_sim = F.cosine_similarity(
-                to_tensor(objects[i]["text_ft"]),
-                to_tensor(objects[j]["text_ft"]),
-                dim=0,
-            )
-            if (
-                visual_sim > merge_visual_sim_thresh
-                and text_sim > merge_text_sim_thresh
-            ):
-                if kept_objects[
-                    j
-                ]:  # Check if the target object has not been merged into another
+            # text_sim = F.cosine_similarity(
+            #     to_tensor(objects[i]["text_ft"]),
+            #     to_tensor(objects[j]["text_ft"]),
+            #     dim=0,
+            # )
+            text_sim = visual_sim
+            if (visual_sim > merge_visual_sim_thresh) and (text_sim > merge_text_sim_thresh):
+                if kept_objects[j]:  # Check if the target object has not been merged into another
                     # Merge object i into object j
                     objects[j] = merge_obj2_into_obj1(
                         objects[j],
@@ -566,14 +629,25 @@ def merge_overlap_objects(
                         run_dbscan=True,
                     )
                     kept_objects[i] = False  # Mark object i as 'merged'
+                    merge_operations.append((i, j))  # Record this merge for edge updates 
+                    index_updates[i] = None  # Update index as merged
         else:
             break  # Stop processing if the current overlap ratio is below the threshold
+        
+    # Update remaining indices in index_updates
+    current_index = 0
+    for original_index, is_kept in enumerate(kept_objects):
+        if is_kept:
+            index_updates[original_index] = current_index
+            current_index += 1
+        else:
+            index_updates[original_index] = None
 
     # Create a new list of objects excluding those that were merged
     new_objects = [obj for obj, keep in zip(objects, kept_objects) if keep]
     objects = MapObjectList(new_objects)
 
-    return objects
+    return objects, index_updates
 
 # @profile
 def denoise_objects(
@@ -619,20 +693,31 @@ def denoise_objects(
 
 # @profile
 def filter_objects(
-    obj_min_points: int, obj_min_detections: int, objects: MapObjectList
+    obj_min_points: int, 
+    obj_min_detections: int, 
+    objects: MapObjectList, 
+    map_edges: MapEdgeMapping = None
 ):
     print("Before filtering:", len(objects))
     objects_to_keep = []
-    for obj in objects:
-        if (
-            len(obj["pcd"].points) >= obj_min_points
-            and obj["num_detections"] >= obj_min_detections
-        ):
-            objects_to_keep.append(obj)
-    objects = MapObjectList(objects_to_keep)
-    print("After filtering:", len(objects))
+    new_index_map = {}  # Maps old indices to new indices if edges are provided
 
-    return objects
+    # Identify which objects to keep
+    for index, obj in enumerate(objects):
+        if len(obj["pcd"].points) >= obj_min_points and obj["num_detections"] >= obj_min_detections:
+            objects_to_keep.append(obj)
+            if map_edges is not None:
+            new_index_map[index] = len(objects_to_keep) - 1
+
+    # Create a new MapObjectList from the kept objects
+    new_objects = MapObjectList(objects_to_keep)
+    print("After filtering:", len(new_objects))
+
+    # Update edges if provided
+    if map_edges and new_index_map:
+        map_edges.update_indices(new_index_map, new_objects)
+
+    return new_objects
 
 # @profile
 def merge_objects(
@@ -646,6 +731,8 @@ def merge_objects(
     dbscan_min_points: int,
     spatial_sim_type: str,
     device: str,
+    do_edges: bool = False,
+    map_edges = None,
 ):
     if len(objects) == 0:
         return objects
@@ -659,8 +746,9 @@ def merge_objects(
         downsample_voxel_size=downsample_voxel_size,
     )
     print("Before merging:", len(objects))
+    # old_objects = copy.deepcopy(objects)
     # Pass all necessary configuration parameters to merge_overlap_objects
-    objects = merge_overlap_objects(
+    objects, index_updates = merge_overlap_objects(
         merge_overlap_thresh=merge_overlap_thresh,
         merge_visual_sim_thresh=merge_visual_sim_thresh,
         merge_text_sim_thresh=merge_text_sim_thresh,
@@ -672,10 +760,40 @@ def merge_objects(
         dbscan_min_points=dbscan_min_points,
         spatial_sim_type=spatial_sim_type,
         device=device,
+        map_edges=map_edges,
     )
-    print("After merging:", len(objects))
+    
+    # print(f"MERGE OPERATIONS: \n{merge_operations}")
+    
+    # print("MERGE OPERATIONS: ")
+    # for oper in merge_operations:
+    #     obj_1_curr_num = old_objects[oper[0]]['curr_obj_num']
+    #     obj_2_curr_num = old_objects[oper[1]]['curr_obj_num']
+    #     print(f"Merge {obj_1_curr_num} into {obj_2_curr_num}")
+    
+    # k=1
+    # for i, j in zip(list(range(len(old_objects))), index_updates):
+    #     print(i,j)
+    
+    # if map_edges is not None:
+    if do_edges:
+        map_edges.merge_update_indices(index_updates)
+        map_edges.update_objects_list(objects)
+        print("After merging:", len(objects))
 
-    return objects
+    # if map_edges is not None:
+    #     # Apply each recorded merge operation to the edges
+    #     for source_idx, dest_idx in merge_operations:
+    #         map_edges.merge_objects_edges(source_idx, dest_idx)
+    #     map_edges.update_objects_list(objects)
+    #     print("After merging:", len(objects))
+        
+        # now update all the edge indices using the index_updates, how?
+
+    if do_edges:
+        return objects, map_edges
+    else:
+        return objects
 
 
 # @profile
@@ -731,6 +849,8 @@ def filter_gobs(
 
     for k in gobs.keys():
         if isinstance(gobs[k], str) or k == "classes":  # Captions
+            continue
+        if k in ['labels', 'edges', 'detection_class_labels', 'text_feats']:
             continue
         elif isinstance(gobs[k], list):
             gobs[k] = [gobs[k][i] for i in idx_to_keep]
@@ -933,12 +1053,9 @@ def make_detection_list_from_pcd_and_gobs(
         
         is_bg_object = bool(curr_class_name in obj_classes.get_bg_classes_arr())
         
-        tracker.curr_class_count[curr_class_name] += 1
-        tracker.total_object_count += 1
         # print(f"Line 937, tracker.total_object_count INCREMENTED: {tracker.total_object_count }")
         num_obj_in_class = tracker.curr_class_count[curr_class_name]
         
-        tracker.brand_new_counter += 1
         
         detected_object = {
             'id' : uuid.uuid4(),
@@ -962,7 +1079,7 @@ def make_detection_list_from_pcd_and_gobs(
             'pcd': obj_pcds_and_bboxes[mask_idx]['pcd'],
             'bbox': obj_pcds_and_bboxes[mask_idx]['bbox'],
             'clip_ft': to_tensor(gobs['image_feats'][mask_idx]),
-            'text_ft': to_tensor(gobs['text_feats'][mask_idx]),
+            # 'text_ft': to_tensor(gobs['text_feats'][mask_idx]),
             'num_obj_in_class': num_obj_in_class,
             'curr_obj_num': tracker.total_object_count,
             'new_counter' : tracker.brand_new_counter,
@@ -976,6 +1093,10 @@ def make_detection_list_from_pcd_and_gobs(
         #     bg_detection_list.append(detected_object)
         # else:
         detection_list.append(detected_object)
+        
+        tracker.curr_class_count[curr_class_name] += 1
+        tracker.total_object_count += 1
+        tracker.brand_new_counter += 1
     
     return detection_list # , bg_detection_list
 
@@ -1140,6 +1261,7 @@ def detections_to_obj_pcd_and_bbox(
 
         if trans_pose is not None:
             pcd.transform(trans_pose)  # Apply transformation directly to the point cloud
+            pass
 
         bbox = get_bounding_box(spatial_sim_type, pcd)
         if bbox.volume() < 1e-6:
@@ -1215,3 +1337,72 @@ def prepare_objects_save_vis(objects: MapObjectList, downsample_size: float=0.02
                 del objects_to_save[i][k]
                 
     return objects_to_save.to_serializable()
+
+def process_edges(match_indices, gobs, initial_objects_count, objects, map_edges):
+    # Step 1: Generate match_indices_w_new_obj with indices for new objects
+    # Initial count of objects before processing new detections
+    new_object_count = 0  # Counter for new objects
+
+    # Create a list of match indices with new objects index instead of None
+    match_indices_w_new_obj = []
+    for match_index in match_indices:
+        if match_index is None:
+            # Assign the future index for new objects and increment the counter
+            new_obj_index = initial_objects_count + new_object_count
+            match_indices_w_new_obj.append(new_obj_index)
+            new_object_count += 1
+        else:
+            match_indices_w_new_obj.append(match_index)
+
+    # Step 2: Create a mapping from 2D detection labels to detection indices
+    detection_label_to_index = {label: index for index, label in enumerate(gobs['detection_class_labels'])}
+    
+    # Step 3: Use match_indices_w_new_obj for translating 2D edges to indices in the existing objects list
+    curr_edges_3d_by_index = []
+    for edge in gobs['edges']:
+        obj1_label, relation, obj2_label = edge
+        obj1_index = int(obj1_label.split(" ")[-1])
+        obj2_index = int(obj2_label.split(" ")[-1])
+        
+        # check that the indices are not None
+        if (obj1_index is None) or (obj2_index is None):
+            k=1
+            # sometimes gpt4v returns a relation with a class that is not in the detections
+            continue
+        
+        
+        # check that the object indices are not out of range
+        if (obj1_index is None) or (obj1_index >= len(match_indices_w_new_obj)):
+            continue
+        if (obj2_index is None) or (obj2_index >= len(match_indices_w_new_obj)):
+            continue
+        
+        # Directly map 2D detection indices to object list indices using match_indices_w_new_obj
+        obj1_objects_index = match_indices_w_new_obj[obj1_index] if obj1_index is not None else None
+        obj2_objects_index = match_indices_w_new_obj[obj2_index] if obj2_index is not None else None
+        
+        if obj1_objects_index >= len(objects) or obj2_objects_index >= len(objects):
+            continue
+
+        curr_edges_3d_by_index.append((obj1_objects_index, relation, obj2_objects_index))
+
+    print(f"Line 624, curr_edges_3d_by_index: {curr_edges_3d_by_index}")
+    
+    # Add the new edges to the map
+    for (obj_1_idx, rel_type, obj_2_idx) in curr_edges_3d_by_index:
+        if obj_1_idx == obj_2_idx: # skip loop edges
+            continue
+        map_edges.add_or_update_edge(obj_1_idx, obj_2_idx, rel_type)
+        
+    # Just making a copy of the edges by object number for viz
+    map_edges_by_curr_obj_num = []
+    for (obj1_idx, obj2_idx), map_edge in map_edges.edges_by_index.items():
+        # check if the idxes are more than the length of the objects, if so, continue
+        if obj1_idx >= len(objects) or obj2_idx >= len(objects):
+            continue
+        obj1_curr_obj_num = objects[obj1_idx]['curr_obj_num']
+        obj2_curr_obj_num = objects[obj2_idx]['curr_obj_num']
+        rel_type = map_edge.rel_type
+        map_edges_by_curr_obj_num.append((obj1_curr_obj_num, rel_type, obj2_curr_obj_num))
+        
+    return map_edges

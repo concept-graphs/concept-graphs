@@ -5,14 +5,15 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 # Standard library imports
 from typing import Mapping
 import uuid
+from conceptgraph.utils.optional_wandb_wrapper import OptionalWandB
 from conceptgraph.utils.logging_metrics import DenoisingTracker, MappingTracker
 import cv2
 import os
-import PyQt5
+# import PyQt5
 
-# Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
-pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
-os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
+# # Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
+# pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
+# os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
 
 
 import copy
@@ -30,8 +31,6 @@ import numpy as np
 from open3d.io import read_pinhole_camera_parameters
 import torch
 from tqdm import trange
-
-import wandb
 
 import hydra
 from omegaconf import DictConfig
@@ -95,7 +94,9 @@ CLOUD_NAME = "points"
 def main(cfg : DictConfig):
     tracker = MappingTracker()
     
-    wandb.init(project="concept-graphs", 
+    owandb = OptionalWandB()
+    owandb.set_use_wandb(cfg.use_wandb)
+    owandb.init(project="concept-graphs", 
             #    entity="concept-graphs",
                 config=cfg_to_dict(cfg),
                )
@@ -183,6 +184,7 @@ def main(cfg : DictConfig):
     
     MultiWinApp(
         cfg=cfg, 
+        owandb=owandb,
         dataset=dataset, 
         objects=objects,
         exp_out_path=exp_out_path,
@@ -209,6 +211,7 @@ class MultiWinApp:
     def __init__(
         self,
         cfg,
+        owandb,
         dataset,
         objects,
         exp_out_path,
@@ -240,6 +243,7 @@ class MultiWinApp:
         self.prev_bbox_names = []
 
         self.cfg = cfg
+        self.owandb = owandb
         self.dataset = dataset
         self.objects = objects
         self.exp_out_path = exp_out_path
@@ -575,7 +579,7 @@ class MultiWinApp:
             if len(self.objects) == 0:
                 self.objects.extend(detection_list)
                 self.tracker.increment_total_objects(len(detection_list))
-                wandb.log({
+                self.owandb.log({
                         "total_objects_so_far": self.tracker.get_total_objects(),
                         "objects_this_frame": len(detection_list),
                     })
@@ -762,7 +766,7 @@ class MultiWinApp:
                     create_symlink=True
                 )
 
-            wandb.log({
+            self.owandb.log({
                 "frame_idx": self.frame_idx,
                 "counter": self.counter,
                 "exit_early_flag": self.exit_early_flag,
@@ -771,7 +775,7 @@ class MultiWinApp:
 
             self.tracker.increment_total_objects(len(self.objects))
             self.tracker.increment_total_detections(len(detection_list))
-            wandb.log({
+            self.owandb.log({
                     "total_objects": self.tracker.get_total_objects(),
                     "objects_this_frame": len(self.objects),
                     "total_detections": self.tracker.get_total_detections(),
@@ -818,17 +822,15 @@ class MultiWinApp:
                     self.main_vis.remove_geometry(bbox_name)
                 self.prev_bbox_names = []
                 
+                # Add the new objects and bounding boxes
                 for obj_num, obj in enumerate(self.objects):
                     obj_label = f"{obj['curr_obj_num']}_{obj['class_name']}"
                     
                     obj_name = f"obj_{obj_label}"
                     bbox_name = f"bbox_{obj_label}"
                     
-                    
-                    
                     self.prev_obj_names.append(obj_name)
                     self.main_vis.add_geometry(obj_name, obj['pcd'])
-                    
                     
                     self.prev_bbox_names.append(bbox_name)
                     self.main_vis.add_geometry(bbox_name, obj['bbox'] )
@@ -862,7 +864,8 @@ class MultiWinApp:
                 break
             o3d.visualization.gui.Application.instance.post_to_main_thread(
                 self.main_vis, my_update_cloud)
-            
+            # o3d.visualization.gui.Application.instance.post_to_main_thread(
+            #     self.image_window, self.update_images())
             
             
 
@@ -924,7 +927,7 @@ class MultiWinApp:
             if self.cfg.save_video:
                 save_video_detections(self.det_exp_path)
             
-        wandb.finish()
+        self.owandb.finish()
         return True  # False would cancel the close
 
 

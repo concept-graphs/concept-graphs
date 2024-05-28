@@ -1,10 +1,10 @@
 import cv2
 import os
-import PyQt5
+# import PyQt5
 
-# Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
-pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
-os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
+# # Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
+# pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
+# os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
 
 import copy
 import json
@@ -23,7 +23,8 @@ import open_clip
 
 import distinctipy
 
-from gradslam.structures.pointclouds import Pointclouds
+# from conceptgraph.utils.pointclouds import Pointclouds
+from conceptgraph.utils.pointclouds import Pointclouds
 
 from conceptgraph.slam.slam_classes import MapObjectList
 from conceptgraph.utils.vis import LineMesh
@@ -300,6 +301,10 @@ def main(args):
         probs = F.softmax(similarities, dim=0)
         max_prob_idx = torch.argmax(probs)
         similarity_colors = cmap(normalized_similarities.detach().cpu().numpy())[..., :3]
+
+        max_prob_object = objects[max_prob_idx]
+        print(f"Most probable object is at index {max_prob_idx} with class name '{max_prob_object['class_name']}'")
+        print(f"location xyz: {max_prob_object['bbox'].center}")
         
         for i in range(len(objects)):
             pcd = pcds[i]

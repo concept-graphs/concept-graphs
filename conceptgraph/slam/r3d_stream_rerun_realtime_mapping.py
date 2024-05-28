@@ -11,6 +11,7 @@ import pickle
 import gzip
 
 # Third-party imports
+from conceptgraph.utils.record3d_utils import DemoApp
 import cv2
 import numpy as np
 import scipy.ndimage as ndi
@@ -44,7 +45,8 @@ from conceptgraph.utils.general_utils import (
     ObjectClasses, 
     find_existing_image_path, 
     get_det_out_path, 
-    get_exp_out_path, 
+    get_exp_out_path,
+    get_stream_data_out_path, 
     get_vlm_annotated_image_path, 
     handle_rerun_saving, 
     load_saved_detections, 
@@ -94,7 +96,6 @@ from conceptgraph.slam.mapping import (
 from conceptgraph.utils.model_utils import compute_clip_features_batched
 from conceptgraph.utils.general_utils import get_vis_out_path, cfg_to_dict, check_run_detections
 
-
 # Disable torch gradient computation
 torch.set_grad_enabled(False)
 
@@ -102,6 +103,10 @@ torch.set_grad_enabled(False)
 @hydra.main(version_base=None, config_path="../hydra_configs/", config_name="rerun_realtime_mapping")
 # @profile
 def main(cfg : DictConfig):
+    
+    app = DemoApp()
+    app.connect_to_device(dev_idx=0)
+    
     tracker = MappingTracker()
     
     orr = OptionalReRun()
@@ -117,20 +122,6 @@ def main(cfg : DictConfig):
                )
     cfg = process_cfg(cfg)
 
-    # Initialize the dataset
-    dataset = get_dataset(
-        dataconfig=cfg.dataset_config,
-        start=cfg.start,
-        end=cfg.end,
-        stride=cfg.stride,
-        basedir=cfg.dataset_root,
-        sequence=cfg.scene_id,
-        desired_height=cfg.image_height,
-        desired_width=cfg.image_width,
-        device="cpu",
-        dtype=torch.float,
-    )
-    # cam_K = dataset.get_cam_K()
 
     objects = MapObjectList(device=cfg.device)
     map_edges = MapEdgeMapping(objects)
@@ -162,6 +153,8 @@ def main(cfg : DictConfig):
     run_detections = check_run_detections(cfg.force_detection, det_exp_path)
     det_exp_pkl_path = get_det_out_path(det_exp_path)
     det_exp_vis_path = get_vis_out_path(det_exp_path)
+    
+    stream_rgb_path, stream_depth_path, stream_poses_path = get_stream_data_out_path(cfg.dataset_root, cfg.scene_id)
     
     prev_adjusted_pose = None
 
@@ -196,7 +189,9 @@ def main(cfg : DictConfig):
 
     exit_early_flag = False
     counter = 0
-    for frame_idx in trange(len(dataset)):
+    frame_idx = 0
+    total_frames = 500 # adjust as you like
+    for frame_idx in trange(total_frames):
         tracker.curr_frame_idx = frame_idx
         counter+=1
         orr.set_time_sequence("frame", frame_idx)
@@ -207,18 +202,36 @@ def main(cfg : DictConfig):
             exit_early_flag = True
 
         # If exit early flag is set and we're not at the last frame, skip this iteration
-        if exit_early_flag and frame_idx < len(dataset) - 1:
+        if exit_early_flag and frame_idx < total_frames - 1:
             continue
+        
+        # Get the frame data
+        s_rgb, s_depth, s_intrinsic_mat, s_camera_pose = app.get_frame_data()
 
-        # Read info about current frame from dataset
+        # save the rgb to the stream folder with an appropriate name
+        curr_stream_rgb_path = stream_rgb_path / f"{frame_idx}.jpg"
+        cv2.imwrite(str(curr_stream_rgb_path), s_rgb)
+        color_path = curr_stream_rgb_path
+        
+        if cfg.save_detections:
+        
+            # save depth to the stream folder with an appropriate name
+            curr_stream_depth_path = stream_depth_path / f"{frame_idx}.png"
+            cv2.imwrite(str(curr_stream_depth_path), s_depth)
+            
+            # save the camera pose to the stream folder with an appropriate name 
+            curr_stream_pose_path = stream_poses_path / f"{frame_idx}.npz"
+            np.savez(str(curr_stream_pose_path), s_camera_pose)
+
+        # Read info about current frame from stream
         # color image
-        color_path = Path(dataset.color_paths[frame_idx])
         image_original_pil = Image.open(color_path)
-        # color and depth tensors, and camera instrinsics matrix
-        color_tensor, depth_tensor, intrinsics, *_ = dataset[frame_idx]
-
+        
+        color_tensor = torch.from_numpy(s_rgb.astype('float32')) 
+        depth_tensor = torch.from_numpy(s_depth.astype('float32'))
+        intrinsics = s_intrinsic_mat
+        
         # Covert to numpy and do some sanity checks
-        depth_tensor = depth_tensor[..., 0]
         depth_array = depth_tensor.cpu().numpy()
         color_np = color_tensor.cpu().numpy() # (H, W, 3)
         image_rgb = (color_np).astype(np.uint8) # (H, W, 3)
@@ -256,7 +269,7 @@ def main(cfg : DictConfig):
                 masks_np = masks_tensor.cpu().numpy()
             else:
                 masks_np = np.empty((0, *color_tensor.shape[:2]), dtype=np.float64)
-
+                
             # Create a detections object that we will save later
             curr_det = sv.Detections(
                 xyxy=xyxy_np,
@@ -265,8 +278,8 @@ def main(cfg : DictConfig):
                 mask=masks_np,
             )
             
-            # Make the edges
-            labels, edges, edge_image = make_vlm_edges(image, curr_det, obj_classes, detection_class_labels, det_exp_vis_path, color_path, cfg.make_edges, openai_client)
+            # No edges during streaming for now
+            labels, edges, edge_image = make_vlm_edges(image, curr_det, obj_classes, detection_class_labels, det_exp_vis_path, color_path, make_edges_flag=False, openai_client=openai_client)
             
             image_crops, image_feats, text_feats = compute_clip_features_batched(
                 image_rgb, curr_det, clip_model, clip_preprocess, clip_tokenizer, obj_classes.get_classes_arr(), cfg.device)
@@ -319,8 +332,7 @@ def main(cfg : DictConfig):
                 raise FileNotFoundError(f"No detections found for frame {frame_idx}at paths \n{det_exp_pkl_path / color_path.stem} or \n{det_exp_pkl_path / f'{int(color_path.stem):06}'}.")
 
         # get pose, this is the untrasformed pose.
-        unt_pose = dataset.poses[frame_idx]
-        unt_pose = unt_pose.cpu().numpy()
+        unt_pose = s_camera_pose
 
         # Don't apply any transformation otherwise
         adjusted_pose = unt_pose
@@ -435,10 +447,10 @@ def main(cfg : DictConfig):
         )
         map_edges = process_edges(match_indices, gobs, len(objects), objects, map_edges)
 
-        is_final_frame = frame_idx == len(dataset) - 1
+        is_final_frame = frame_idx == total_frames - 1
         if is_final_frame:
             print("Final frame detected. Performing final post-processing...")
-
+            
         ### Perform post-processing periodically if told so
 
         # Denoising
@@ -479,7 +491,7 @@ def main(cfg : DictConfig):
             frame_idx,
             is_final_frame,
         ):
-            objects, map_edges = measure_time(merge_objects)(
+            objects = measure_time(merge_objects)(
                 merge_overlap_thresh=cfg["merge_overlap_thresh"],
                 merge_visual_sim_thresh=cfg["merge_visual_sim_thresh"],
                 merge_text_sim_thresh=cfg["merge_text_sim_thresh"],
@@ -490,11 +502,11 @@ def main(cfg : DictConfig):
                 dbscan_min_points=cfg["dbscan_min_points"],
                 spatial_sim_type=cfg["spatial_sim_type"],
                 device=cfg["device"],
-                do_edges=cfg["make_edges"],
+                do_edges=False, # false for now, otherwise use cfg["make_edges"],
                 map_edges=map_edges
-            )
+            )   
         orr_log_objs_pcd_and_bbox(objects, obj_classes)
-        orr_log_edges(objects, map_edges, obj_classes)
+        # orr_log_edges(objects, map_edges, obj_classes) # not using edges for now 
 
         if cfg.save_objects_all_frames:
             save_objects_for_frame(

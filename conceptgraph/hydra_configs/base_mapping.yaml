@@ -1,3 +1,6 @@
+defaults:
+  - base_paths
+
 # dataset info
 dataset_root: null
 dataset_config: null
@@ -8,6 +11,11 @@ stride: 50
 image_height: null # if null, it will be determined by dataconfig
 image_width: null # if null, it will be determined by dataconfig
 
+make_edges: !!bool False
+
+periodically_save_pcd: !!bool False
+periodically_save_pcd_interval: 10
+
 # Input detections
 detections_exp_suffix: exp_base_detections_suffix
 # gsa_variant: ram
@@ -17,7 +25,7 @@ detections_exp_suffix: exp_base_detections_suffix
 
 
 # This json file controls an early exit feature for the mapping scripts. Specifically, it is periodically checked at every iteration of the loops within 'realtime_mapping.py' and 'streamlined_mapping.py'. When the 'exit_early' entry is set to true, these scripts will bypass their normal iterative processing loop and proceed directly to their final frame processing and cleanup phase. This allows for a quick termination of the mapping process, which can be useful in scenarios where immediate results are preferred or when it's necessary to halt processing due to external constraints. To trigger an early exit, manually edit this file by changing the value of 'exit_early' from false to true. The change will take effect at the next loop iteration.
-exit_early_file: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/conceptgraph/hydra_configs/early_exit.json
+exit_early_file: ${repo_root}/conceptgraph/hydra_configs/early_exit.json
 
 device: cuda
 
@@ -81,4 +89,7 @@ class_agnostic: !!bool False   # If set, the color will be set by instance, rath
 save_objects_all_frames: !!bool False   # If True, the objects at all timesteps will be saved for future animation
 
 
-latest_pcd_filepath: /home/kuwajerw/repos/new_conceptgraphs/concept-graphs/latest_pcd_save
+use_rerun: !!bool False
+save_rerun: !!bool False
+
+latest_pcd_filepath: ${repo_root}/latest_pcd_save

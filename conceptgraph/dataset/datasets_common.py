@@ -3,6 +3,19 @@ PyTorch dataset classes for datasets in the NICE-SLAM format.
 Large chunks of code stolen and adapted from:
 https://github.com/cvg/nice-slam/blob/645b53af3dc95b4b348de70e759943f7228a61ca/src/utils/datasets.py
 
+Also lots of code from the gradslam library
+Basically all the dataset stuff, the imports used to be:
+# from gradslam.datasets import datautils
+# from gradslam.geometry.geometryutils import relative_transformation
+# from gradslam.slam.pointfusion import PointFusion
+# from gradslam.structures.rgbdimages import RGBDImages
+
+All that credit goes to Krishna and the team here:
+https://gradslam.github.io/
+https://github.com/gradslam/gradslam
+
+I'm just removing the gradslam dependency to make conceptgraphs easier to install.
+
 Support for Replica (sequences from the iMAP paper), TUM RGB-D, NICE-SLAM Apartment.
 TODO: Add Azure Kinect dataset support
 """
@@ -23,12 +36,12 @@ import yaml
 from natsort import natsorted
 from scipy.spatial.transform import Rotation as R
 
-from gradslam.datasets import datautils
-from gradslam.geometry.geometryutils import relative_transformation
-from gradslam.slam.pointfusion import PointFusion
-from gradslam.structures.rgbdimages import RGBDImages
+from conceptgraph.dataset import conceptgraphs_datautils
+from conceptgraph.utils.geometry import relative_transformation
+from conceptgraph.dataset.conceptgraphs_rgbd_images import RGBDImages
 
-from conceptgraph.utils.general_utils import to_scalar, measure_time
+
+from conceptgraph.utils.general_utils import measure_time
 
 
 def as_intrinsics_matrix(intrinsics):
@@ -43,17 +56,6 @@ def as_intrinsics_matrix(intrinsics):
     K[1, 2] = intrinsics[3]
     return K
 
-def from_intrinsics_matrix(K: torch.Tensor) -> tuple[float, float, float, float]:
-    '''
-    Get fx, fy, cx, cy from the intrinsics matrix
-    
-    return 4 scalars
-    '''
-    fx = to_scalar(K[0, 0])
-    fy = to_scalar(K[1, 1])
-    cx = to_scalar(K[0, 2])
-    cy = to_scalar(K[1, 2])
-    return fx, fy, cx, cy
 
 
 def readEXR_onlydepth(filename):
@@ -222,9 +224,9 @@ class GradSLAMDataset(torch.utils.data.Dataset):
             interpolation=cv2.INTER_LINEAR,
         )
         if self.normalize_color:
-            color = datautils.normalize_image(color)
+            color = conceptgraphs_datautils.normalize_image(color)
         if self.channels_first:
-            color = datautils.channels_first(color)
+            color = conceptgraphs_datautils.channels_first(color)
         return color
 
     def _preprocess_depth(self, depth: np.ndarray):
@@ -248,7 +250,7 @@ class GradSLAMDataset(torch.utils.data.Dataset):
         )
         depth = np.expand_dims(depth, -1)
         if self.channels_first:
-            depth = datautils.channels_first(depth)
+            depth = conceptgraphs_datautils.channels_first(depth)
         return depth / self.png_depth_scale
     
     def _preprocess_poses(self, poses: torch.Tensor):
@@ -313,7 +315,7 @@ class GradSLAMDataset(torch.utils.data.Dataset):
         depth = self._preprocess_depth(depth)
         depth = torch.from_numpy(depth)
 
-        K = datautils.scale_intrinsics(
+        K = conceptgraphs_datautils.scale_intrinsics(
             K, self.height_downsample_ratio, self.width_downsample_ratio
         )
         intrinsics = torch.eye(4).to(K)
@@ -1168,15 +1170,15 @@ if __name__ == "__main__":
         has_embeddings=False,  # KM
     )
 
-    # SLAM
-    slam = PointFusion(odom="gt", dsratio=1, device="cuda:0", use_embeddings=False)
-    pointclouds, recovered_poses = slam(rgbdimages)
+    # # SLAM
+    # slam = PointFusion(odom="gt", dsratio=1, device="cuda:0", use_embeddings=False)
+    # pointclouds, recovered_poses = slam(rgbdimages)
 
-    import open3d as o3d
+    # import open3d as o3d
 
-    print(pointclouds.colors_padded.shape)
-    pcd = pointclouds.open3d(0)
-    o3d.visualization.draw_geometries([pcd])
+    # print(pointclouds.colors_padded.shape)
+    # pcd = pointclouds.open3d(0)
+    # o3d.visualization.draw_geometries([pcd])
 
     # from icl_dataset import ICLWithCLIPEmbeddings
 

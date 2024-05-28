@@ -17,7 +17,8 @@ from conceptgraph.slam.utils import (
     merge_obj2_into_obj1, 
     compute_overlap_matrix_2set
 )
-import wandb
+from conceptgraph.utils.optional_wandb_wrapper import OptionalWandB
+owandb = OptionalWandB()
 
 tracker = MappingTracker()
 
@@ -158,13 +159,13 @@ def merge_obj_matches(
     tracker.increment_total_objects(len(objects) - temp_curr_object_count)
     # wandb.log({"merges_this_frame" :len(match_indices) - match_indices.count(None)})
     # wandb.log({"total_merges": tracker.total_merges})
-    # wandb.log(
-    #     {
-    #         "merges_this_frame": len(match_indices) - match_indices.count(None),
-    #         "total_merges": tracker.total_merges,
-    #         "frame_idx": tracker.curr_frame_idx,
-    #     }
-    # )
+    wandb.log(
+        {
+            "merges_this_frame": len(match_indices) - match_indices.count(None),
+            "total_merges": tracker.total_merges,
+            "frame_idx": tracker.curr_frame_idx,
+        }
+    )
     return objects
 
 

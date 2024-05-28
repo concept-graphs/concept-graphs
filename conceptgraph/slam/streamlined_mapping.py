@@ -6,11 +6,11 @@ The script is used to model Grounded SAM detections in 3D, it assumes the tag2te
 from conceptgraph.utils.logging_metrics import DenoisingTracker
 import cv2
 import os
-import PyQt5
+# import PyQt5
 
-# Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
-pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
-os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
+# # Set the QT_QPA_PLATFORM_PLUGIN_PATH environment variable
+# pyqt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt", "plugins", "platforms")
+# os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = pyqt_plugin_path
 
 
 import copy

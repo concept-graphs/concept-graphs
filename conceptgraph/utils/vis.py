@@ -1,7 +1,10 @@
 import copy
+import logging
+from pathlib import Path
 from typing import Iterable
 import dataclasses
 from PIL import Image
+from conceptgraph.utils.ious import mask_subtract_contained
 import cv2
 
 import numpy as np
@@ -10,9 +13,14 @@ import matplotlib.pyplot as plt
 import torch
 import open3d as o3d
 
+import scipy.ndimage as ndi  # Importing for centroid calculation
+
 import supervision as sv
 from supervision.draw.color import Color, ColorPalette
 from conceptgraph.slam.slam_classes import MapObjectList
+
+from typing import List, Optional, Union
+
 
 class OnlineObjectRenderer():
     '''
@@ -236,6 +244,250 @@ def vis_result_fast_on_depth(
         
     annotated_image = mask_annotator.annotate(scene=depth_image.copy(), detections=detections)
     
+    if draw_bbox:
+        annotated_image = box_annotator.annotate(scene=annotated_image, detections=detections, labels=labels)
+    return annotated_image, labels
+
+
+def old_filter_detections(
+    detections: sv.Detections, 
+    classes: list[str], 
+    top_x_detections: Optional[int] = None, 
+    confidence_threshold: float = 0.0,
+    given_labels: Optional[list[str]] = None
+) -> tuple[sv.Detections, list[str]]:
+    '''
+    Filter detections based on confidence threshold and top X detections.
+    Returns a tuple of filtered detections and labels.
+    '''
+    temp = given_labels
+    if not (hasattr(detections, 'confidence') and hasattr(detections, 'class_id') and hasattr(detections, 'xyxy')):
+        print("Detections object is missing required attributes.")
+        return detections, []
+
+    detections_combined = []
+    for index, (confidence, class_id, xyxy, mask) in enumerate(zip(detections.confidence, detections.class_id, detections.xyxy, detections.mask)):
+        if confidence >= confidence_threshold:
+            detections_combined.append((confidence, class_id, xyxy, mask, index))
+
+    # Sort by confidence in descending order
+    detections_combined.sort(key=lambda x: x[0], reverse=True)
+
+    if top_x_detections is not None:
+        detections_combined = detections_combined[:top_x_detections]
+
+    detections_combined = list(reversed(detections_combined))
+
+    filtered_class_ids, filtered_confidences, filtered_xyxy, filtered_mask,filtered_labels = [], [], [], [], []
+    for det_idx, (confidence, class_id, xyxy, mask, original_index) in enumerate(detections_combined):
+        filtered_class_ids.append(class_id)
+        filtered_confidences.append(confidence)
+        filtered_xyxy.append(xyxy)
+        filtered_mask.append(mask)
+        # labels.append(f"{classes[class_id]} {confidence:0.2f}")
+        # labels.append(f"{classes[class_id]} {det_idx + 1}")
+        filtered_labels.append(given_labels[original_index])
+
+    # filtered_detections = sv.Detections(
+    #     class_id=np.array(filtered_class_ids),
+    #     confidence=np.array(filtered_confidences),
+    #     xyxy=np.array(filtered_xyxy)
+    # )
+    # Use this block when creating filtered_detections
+    if not filtered_class_ids:
+        filtered_detections = sv.Detections(
+            class_id=np.array([], dtype=np.int64),
+            confidence=np.array([], dtype=np.float32),
+            xyxy=np.zeros((0, 4), dtype=np.float32),  # Using zeros with explicit shape for empty xyxy
+            mask=np.zeros((0, 1), dtype=np.bool_)
+        )
+    else:
+        filtered_detections = sv.Detections(
+            class_id=np.array(filtered_class_ids, dtype=np.int64),
+            confidence=np.array(filtered_confidences, dtype=np.float32),
+            xyxy=np.array(filtered_xyxy, dtype=np.float32),
+            mask=np.array(filtered_mask, dtype=np.bool_)
+        )
+
+    return filtered_detections, filtered_labels
+
+class CustomBoxAnnotator(sv.BoxAnnotator):
+    def __init__(
+        self,
+        color: Union[Color, ColorPalette] = ColorPalette.DEFAULT,
+        thickness: int = 2,
+        text_color: Color = Color.BLACK,
+        text_scale: float = 0.5,
+        text_thickness: int = 1,
+        text_padding: int = 10,
+        detections: sv.Detections = None,
+        labels: List[str] = None,
+        save_path: str | None = None,
+    ):
+        super().__init__(color, thickness, text_color, text_scale, text_thickness, text_padding)
+        self.label_mask = None
+        self.save_path = save_path
+        if self.save_path is not None:
+            self.save_path.mkdir(parents=True, exist_ok=True)
+            self.save_counter = 0
+        self.curr_detections = detections
+        self.labels = labels
+        self.curr_box_idx = None
+        self.curr_label_idx = None
+
+    def reset_label_mask(self, image_shape):
+        self.label_mask = np.zeros(image_shape[:2], dtype=np.bool_)
+
+    def is_area_occupied(self, x1, y1, x2, y2):
+        if np.any(self.label_mask[y1:y2, x1:x2]):
+            return True
+        return False
+
+    def mark_area_as_occupied(self, x1, y1, x2, y2):
+        self.label_mask[y1:y2, x1:x2] = True
+        
+    def save_debug_image(self, scene):
+        if self.save_path is not None:
+            save_file = self.save_path / f"step_{self.save_counter}.jpg"
+            cv2.imwrite(str(save_file), scene)
+            self.save_counter += 1
+
+    def find_label_position(self, x1, y1, x2, y2, text_width, text_height, image_height, image_width):
+        '''
+        Find the best position for the label text given the bounding box coordinates and text dimensions.
+        Check for collisions with existing labels and image boundaries.
+        '''
+        padding = self.text_padding * 2
+        text_full_width = text_width + padding
+        text_full_height = text_height + padding
+        
+        # Initialize naive positions as a list, starting from 'top_left' and moving clockwise
+        naive_positions = [
+            {"name": "top_left", "x1": x1, "y1": y1 - text_full_height, "x2": x1 + text_full_width, "y2": y1},
+            {"name": "top_right", "x1": x2 - text_full_width, "y1": y1 - text_full_height, "x2": x2, "y2": y1},
+            {"name": "bottom_right", "x1": x2 - text_full_width, "y1": y2, "x2": x2, "y2": y2 + text_full_height},
+            {"name": "bottom_left", "x1": x1, "y1": y2, "x2": x1 + text_full_width, "y2": y2 + text_full_height},
+        ]
+        
+        # Check each image boundary and adjust if necessary
+        positions_list = []
+        for curr_label_pos in naive_positions:
+            # Left iamge boundarry check
+            if curr_label_pos["x1"] < 0:  
+                curr_label_pos["x1"] = 0
+                curr_label_pos["x2"] = min(text_full_width, image_width)
+            # Top image boundary check
+            if curr_label_pos["y1"] < 0:
+                curr_label_pos["y1"] = 0
+                curr_label_pos["y2"] = min(text_full_height, image_height)
+            # Right image boundary check
+            if curr_label_pos["x2"] > image_width:
+                overflow = curr_label_pos["x2"] - image_width
+                curr_label_pos["x1"] = max(curr_label_pos["x1"] - overflow, 0)
+                curr_label_pos["x2"] = image_width
+            # Bottom image boundary check
+            if curr_label_pos["y2"] > image_height:
+                overflow = curr_label_pos["y2"] - image_height
+                curr_label_pos["y1"] = max(curr_label_pos["y1"] - overflow, 0)
+                curr_label_pos["y2"] = image_height
+            positions_list.append(curr_label_pos)
+        
+        # Check for collisions with existing labels
+        curr_id = self.curr_detections.class_id[self.curr_label_idx]
+        curr_label = self.labels[self.curr_label_idx]
+        curr_num = self.curr_label_idx + 1
+        curr_total = len(self.curr_detections)
+        for pos in positions_list:
+            collision_flag = self.is_area_occupied(pos['x1'], pos['y1'], pos['x2'], pos['y2'])
+            logging.debug(f"Checking label {curr_num}/{curr_total} with class ID: {curr_id}, NAME: {curr_label}")
+            logging.debug(f"At {pos['name']} corner at ({pos['x1']}, {pos['y1']}, {pos['x2']}, {pos['y2']}).")
+            logging.debug(f"Collision flag: {collision_flag}")
+            if not collision_flag:
+                return (pos['x1'], pos['y1'], pos['x2'], pos['y2'], pos['name'])
+
+        # If all positions have been checked and all have collisions, log that no viable position was found
+        logging.debug(f"NO VIABLE POSITION for label {curr_num}/{curr_total} with class ID: {curr_id}, NAME: {curr_label}")
+        return (pos['x1'], pos['y1'], pos['x2'], pos['y2'], pos['name']) 
+
+    def annotate(
+        self,
+        scene: np.ndarray,
+        detections: sv.Detections,
+        labels: Optional[List[str]] = None,
+        skip_label: bool = False,
+    ) -> np.ndarray:
+        self.reset_label_mask(scene.shape)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+
+        logging.debug("Starting bounding box drawing process.")
+        for i, (x1, y1, x2, y2) in enumerate(detections.xyxy.astype(int)):
+            self.curr_box_idx = i
+            class_id = detections.class_id[i]
+            text = labels[i] if labels is not None and len(labels) == len(detections) else str(class_id)
+            color = self.color.by_idx(class_id) if isinstance(self.color, ColorPalette) else self.color
+            cv2.rectangle(scene, (x1, y1), (x2, y2), color=color.as_bgr(), thickness=self.thickness)
+            self.save_debug_image(scene)
+            logging.debug(f"Bounding box {i+1}/{len(detections)} drawn for class ID: {class_id}, NAME: {text}")
+            logging.debug(f"with color {str(color)} at {(x1, y1, x2, y2)}")
+            
+        if skip_label:
+            return scene
+        
+        logging.debug("Starting label drawing process.")
+        for i, (x1, y1, x2, y2) in enumerate(detections.xyxy.astype(int)):
+            self.curr_label_idx = i
+            class_id = detections.class_id[i]
+            color = self.color.by_idx(class_id) if isinstance(self.color, ColorPalette) else self.color
+            text = labels[i] if labels is not None and len(labels) == len(detections) else str(class_id)
+
+            text_width, text_height = cv2.getTextSize(text, font, self.text_scale, self.text_thickness)[0]
+            logging.debug(f"Calculated text dimensions for '{text}': width={text_width}, height={text_height}")
+
+            label_x1, label_y1, label_x2, label_y2, pos_desc = self.find_label_position(x1, y1, x2, y2, text_width, text_height, scene.shape[0], scene.shape[1])
+
+            self.mark_area_as_occupied(label_x1, label_y1, label_x2, label_y2)
+            cv2.rectangle(scene, (label_x1, label_y1), (label_x2, label_y2), color=color.as_bgr(), thickness=cv2.FILLED)
+            
+            cv2.putText(scene, text, (int(label_x1) + self.text_padding, int(label_y2) - self.text_padding), font, self.text_scale, self.text_color.as_rgb(), self.text_thickness, cv2.LINE_AA)
+
+            self.save_debug_image(scene)
+            logging.debug(f"Label {i+1}/{len(detections)} for class ID: {class_id}, NAME: {text}")
+            logging.debug(f"drawn with background color {str(color)} at {pos_desc} corner")
+            logging.debug(f"with bounding box ({label_x1}, {label_y1}, {label_x2}, {label_y2})")
+
+        return scene
+
+    
+def vis_result_for_vlm(
+    image: np.ndarray, 
+    detections: sv.Detections, 
+    labels: list[str], 
+    color: Color | ColorPalette = ColorPalette.default(), 
+    draw_bbox: bool = True,
+    thickness: int = 2,
+    text_scale: float = 0.3,
+    text_thickness: int = 1,
+    text_padding: int = 2,
+    save_path: Optional[str] = None
+) -> np.ndarray:
+    '''
+    Annotate the image with the filtered detection results.
+    '''
+
+    save_path = Path(save_path) if save_path is not None else None
+
+    box_annotator = CustomBoxAnnotator(
+        color=color,
+        thickness=thickness,
+        text_scale=text_scale,
+        text_thickness=text_thickness,
+        text_padding=text_padding,
+        detections=detections,
+        labels=labels,
+        save_path=save_path if save_path is not None else None,
+    )
+
+    annotated_image = image.copy()
     if draw_bbox:
         annotated_image = box_annotator.annotate(scene=annotated_image, detections=detections, labels=labels)
     return annotated_image, labels

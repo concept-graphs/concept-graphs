@@ -2,7 +2,6 @@ conceptgraph/outputs
 conceptgraph/scripts/wandb
 conceptgraph/results
 conceptgraph/tmp
-.vscode/launch.json
 manipulation/contact_graspnet/examples
 manipulation/contact_graspnet/test_data
 manipulation/contact_graspnet/checkpoints
@@ -174,3 +173,4 @@ cfslam/tmp.bash
 cfslam/wandb
 cfslam/tmp.png
 cfslam/temp.json
+outputs

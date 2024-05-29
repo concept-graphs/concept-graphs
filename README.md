@@ -25,10 +25,12 @@
 
 ![Splash Figure](./assets/splash-final.png)
 
-# NOTE: Refactored code for easier setup and usage:
-We are in the process of refactoring the code to make ConceptGraphs easier to install and use. At some point in the coming months the current code will be depreceated in favour of the refactored code. At the moment, the refactored code lives on the `ali-dev` [branch](https://github.com/concept-graphs/concept-graphs/tree/ali-dev), and has this corresponding [readme file](https://github.com/concept-graphs/concept-graphs/blob/ali-dev/README.md) and this [getting started video tutorial](https://youtu.be/56jEFyrqqpo?si=jo-qto5Gv8qxqEw2). Some of the benefits include not needing to use groundedDINO, classes staying fixed throughout the mapping cycle, and automatic installation of models needed.
+# Updates
 
-If you'd like to try it out, simply switch to the `ali-dev` branch. and if you run into problems, please open an issue on the repo, we are actively maintaining it and will help you out.
+* The codebase has been significantly refactored in the `ali-dev` [branch](https://github.com/concept-graphs/concept-graphs/tree/ali-dev), which provides a real-time, streamlined re-implementation that supports RGB-D video from iPhone and has a better visualization using [Rerun.io](https://rerun.io/). We also provide this [getting started video tutorial](https://youtu.be/56jEFyrqqpo?si=jo-qto5Gv8qxqEw2). Please check it out!
+* The code for real-world mapping and navigation using a Jackal robot is open-sourced [here](https://github.com/sachaMorin/concept_graphs_jackal).
+* The code for localization and mapping in AI2Thor is released in the codebase. See [here](https://github.com/concept-graphs/concept-graphs/tree/main?tab=readme-ov-file#ai2thor-related-experiments) for instructions.
+
 
 ## Setup
 

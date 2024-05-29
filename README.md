@@ -64,6 +64,7 @@ conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=
 conda install https://anaconda.org/pytorch3d/pytorch3d/0.7.4/download/linux-64/pytorch3d-0.7.4-py310_cu118_pyt201.tar.bz2
 
 # Install the gradslam package and its dependencies
+# Please clone and install them in separate folders, not within the concept-graphs folder. 
 git clone https://github.com/krrish94/chamferdist.git
 cd chamferdist
 pip install .

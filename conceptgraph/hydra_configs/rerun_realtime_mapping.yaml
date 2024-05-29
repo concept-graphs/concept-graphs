@@ -1,8 +1,8 @@
 defaults:
   - base
   - base_mapping
-  # - replica
-  - record3d
+  - replica
+#  - record3d
   - sam
   - classes
   - logging_level
@@ -10,7 +10,7 @@ defaults:
 
 
 detections_exp_suffix: s_detections_stride10 # helpful label to identify your detections
-force_detection: !!bool False
+force_detection: !!bool True
 save_detections: !!bool True
 
 make_edges: !!bool True
@@ -43,8 +43,8 @@ obj_min_points: 0
 obj_min_detections: 1
 
 # For merge_overlap_objects() function
-use_rerun: !!bool True
-save_rerun: !!bool True
+use_rerun: !!bool False
+save_rerun: !!bool False
 
 # hydra:
 #   verbose: true

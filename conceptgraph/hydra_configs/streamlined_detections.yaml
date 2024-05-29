@@ -1,8 +1,8 @@
 defaults:
   - base
   - base_detections
-  - record3d # replica
-  # - sam
+  - replica # replica
+  - sam
   - classes
   - logging_level
   # - multirun_replica

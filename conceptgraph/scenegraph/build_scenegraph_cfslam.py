@@ -42,9 +42,10 @@ torch.autograd.set_grad_enabled(False)
 hf_logging.set_verbosity_error()
 
 # Import OpenAI API
-import openai
+from openai import OpenAI
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 
 
 @dataclass
@@ -59,7 +60,7 @@ class ProgramArgs:
 
     # Path to cache directory
     cachedir: str = "saved/room0"
-    
+
     prompts_path: str = "prompts/gpt_prompts.json"
 
     # Path to map file
@@ -96,10 +97,10 @@ def load_scene_map(args, scene_map):
     1. A dictionary containing an "objects" key.
     2. A list or a dictionary (replace with your expected type).
     """
-    
+
     with gzip.open(Path(args.mapfile), "rb") as f:
         loaded_data = pkl.load(f)
-        
+
         # Check the type of the loaded data to decide how to proceed
         if isinstance(loaded_data, dict) and "objects" in loaded_data:
             scene_map.load_serializable(loaded_data["objects"])
@@ -151,7 +152,7 @@ def draw_red_outline(image, mask):
     # Optionally, add padding around the object by dilating the drawn contours
     kernel = np.ones((5, 5), np.uint8)
     image_np = cv2.dilate(image_np, kernel, iterations=1)
-    
+
     image_pil = Image.fromarray(image_np)
 
     return image_pil
@@ -159,7 +160,7 @@ def draw_red_outline(image, mask):
 
 def crop_image_and_mask(image: Image, mask: np.ndarray, x1: int, y1: int, x2: int, y2: int, padding: int = 0):
     """ Crop the image and mask with some padding. I made a single function that crops both the image and the mask at the same time because I was getting shape mismatches when I cropped them separately.This way I can check that they are the same shape."""
-    
+
     image = np.array(image)
     # Verify initial dimensions
     if image.shape[:2] != mask.shape:
@@ -182,7 +183,7 @@ def crop_image_and_mask(image: Image, mask: np.ndarray, x1: int, y1: int, x2: in
     if image_crop.shape[:2] != mask_crop.shape:
         print("Cropped shape mismatch: Image crop shape {} != Mask crop shape {}".format(image_crop.shape, mask_crop.shape))
         return None, None
-    
+
     # convert the image back to a pil image
     image_crop = Image.fromarray(image_crop)
 
@@ -202,7 +203,7 @@ def blackout_nonmasked_area(image_pil, mask):
 
 def plot_images_with_captions(images, captions, confidences, low_confidences, masks, savedir, idx_obj):
     """ This is debug helper function that plots the images with the captions and masks overlaid and saves them to a directory. This way you can inspect exactly what the LLaVA model is captioning which image with the mask, and the mask confidence scores overlaid."""
-    
+
     n = min(9, len(images))  # Only plot up to 9 images
     nrows = int(np.ceil(n / 3))
     ncols = 3 if n > 1 else 1
@@ -225,10 +226,10 @@ def plot_images_with_captions(images, captions, confidences, low_confidences, ma
         title_text = f"Caption: {captions[i]}\nConfidence: {confidences[i]:.2f}"
         if low_confidences[i]:
             title_text += "\nLow Confidence"
-        
+
         # Wrap the caption text
         wrapped_title = '\n'.join(wrap(title_text, 30))
-        
+
         ax.set_title(wrapped_title, fontsize=12)  # Reduced font size for better fitting
         ax.axis('off')
 
@@ -236,7 +237,7 @@ def plot_images_with_captions(images, captions, confidences, low_confidences, ma
     for i in range(n, nrows * ncols):
         row, col = divmod(i, 3)
         axarr[row][col].axis('off')
-    
+
     plt.tight_layout()
     plt.savefig(savedir / f"{idx_obj}.png")
     plt.close()
@@ -257,7 +258,7 @@ def extract_node_captions(args):
     # Load the scene map
     scene_map = MapObjectList()
     load_scene_map(args, scene_map)
-    
+
     # Scene map is in CFSLAM format
     # keys: 'image_idx', 'mask_idx', 'color_path', 'class_id', 'num_detections',
     # 'mask', 'xyxy', 'conf', 'n_points', 'pixel_area', 'contain_number', 'clip_ft',
@@ -281,7 +282,7 @@ def extract_node_captions(args):
             class_names = [cls.strip() for cls in f.readlines()]
         else:
             raise ValueError("Class names file must be either a json or text file")
-        
+
     print(f"Line 280, class_names: {class_names}")
 
     # Creating a namespace object to pass args to the LLaVA chat object
@@ -322,7 +323,7 @@ def extract_node_captions(args):
         features = []
         captions = []
         low_confidences = []
-        
+
         image_list = []
         image_modified_list = []
         caption_list = []
@@ -373,10 +374,10 @@ def extract_node_captions(args):
             outputs = chat(query=query, image_features=image_features)
             console.print("[bold green]LLaVA:[/bold green] " + outputs)
             captions.append(outputs)
-        
+
             # print(f"Line 274, obj['mask'][idx_det].shape: {obj['mask'][idx_det].shape}")
             # print(f"Line 276, image.size: {image.size}")
-            
+
             # For the LLava debug folder
             conf_value = conf[idx_det]
             image_list.append(image_crop)
@@ -400,7 +401,7 @@ def extract_node_captions(args):
 
         # Save the feature descriptors
         torch.save(features, savedir_feat / f"{idx_obj}.pt")
-        
+
         # Again for the LLava debug folder
         if len(image_list) > 0:
             plot_images_with_captions(image_list, caption_list, confidences_list, low_confidences_list, mask_list, savedir_debug, idx_obj)
@@ -444,7 +445,7 @@ def refine_node_captions(args):
     # Load the scene map
     scene_map = MapObjectList()
     load_scene_map(args, scene_map)
-    
+
     # load the prompt
     gpt_messages = GPTPrompt().get_json()
 
@@ -460,7 +461,7 @@ def refine_node_captions(args):
     for _i in trange(len(captions)):
         if len(captions[_i]) == 0:
             continue
-        
+
         # Prepare the object prompt 
         _dict = {}
         _caption = captions[_i]
@@ -472,20 +473,18 @@ def refine_node_captions(args):
         _dict["captions"] = _caption["captions"]
         # _dict["low_confidences"] = _caption["low_confidences"]
         # Convert to printable string
-        
+
         # Make and format the full prompt
         preds = json.dumps(_dict, indent=0)
 
         start_time = time.time()
-    
+
         curr_chat_messages = gpt_messages[:]
         curr_chat_messages.append({"role": "user", "content": preds})
-        chat_completion = openai.ChatCompletion.create(
-            # model="gpt-3.5-turbo",
-            model="gpt-4-turbo-preview",
-            messages=curr_chat_messages,
-            timeout=TIMEOUT,  # Timeout in seconds
-        )
+        chat_completion = client.chat.completions.create(# model="gpt-3.5-turbo",
+        model="gpt-4-turbo-preview",
+        messages=curr_chat_messages,
+        timeout=TIMEOUT)
         elapsed_time = time.time() - start_time
         if elapsed_time > TIMEOUT:
             print("Timed out exceeded!")
@@ -495,17 +494,17 @@ def refine_node_captions(args):
             responses.append(json.dumps(_dict))
             unsucessful_responses += 1
             continue
-        
+
         # count unsucessful responses
-        if "invalid" in chat_completion["choices"][0]["message"]["content"].strip("\n"):
+        if "invalid" in chat_completion.choices[0].message.content.strip("\n"):
             unsucessful_responses += 1
-            
+
         # print output
         prjson([{"role": "user", "content": preds}])
-        print(chat_completion["choices"][0]["message"]["content"])
+        print(chat_completion.choices[0].message.content)
         print(f"Unsucessful responses so far: {unsucessful_responses}")
-        _dict["response"] = chat_completion["choices"][0]["message"]["content"].strip("\n")
-        
+        _dict["response"] = chat_completion.choices[0].message.content.strip("\n")
+
         # save the response
         responses.append(json.dumps(_dict))
         save_json_to_file(_dict, responses_savedir / f"{_caption['id']}.json")
@@ -615,13 +614,13 @@ def build_scenegraph(args):
     indices_to_remove = list(indices_to_remove)
     # combine with also_indices_to_remove and sort the list
     indices_to_remove = list(set(indices_to_remove + also_indices_to_remove))
-    
+
     # List of tags in original scene map that are in the pruned scene map
     segment_ids_to_retain = [i for i in range(len(scene_map)) if i not in indices_to_remove]
     with open(Path(args.cachedir) / "cfslam_scenegraph_invalid_indices.pkl", "wb") as f:
         pkl.dump(indices_to_remove, f)
     print(f"Removed {len(indices_to_remove)} segments")
-    
+
     # Filtering responses based on segment_ids_to_retain
     responses = [resp for resp in responses if resp['id'] in segment_ids_to_retain]
 
@@ -762,12 +761,10 @@ def build_scenegraph(args):
                     """
 
                     start_time = time.time()
-                    chat_completion = openai.ChatCompletion.create(
-                        # model="gpt-3.5-turbo",
-                        model="gpt-4",
-                        messages=[{"role": "user", "content": DEFAULT_PROMPT + "\n\n" + input_json_str}],
-                        timeout=TIMEOUT,  # Timeout in seconds
-                    )
+                    chat_completion = client.chat.completions.create(# model="gpt-3.5-turbo",
+                    model="gpt-4",
+                    messages=[{"role": "user", "content": DEFAULT_PROMPT + "\n\n" + input_json_str}],
+                    timeout=TIMEOUT)
                     elapsed_time = time.time() - start_time
                     output_dict = input_dict
                     if elapsed_time > TIMEOUT:
@@ -777,7 +774,7 @@ def build_scenegraph(args):
                     else:
                         try:
                             # Attempt to parse the output as a JSON
-                            chat_output_json = json.loads(chat_completion["choices"][0]["message"]["content"])
+                            chat_output_json = json.loads(chat_completion.choices[0].message.content)
                             # If the output is a valid JSON, then add it to the output dictionary
                             output_dict["object_relation"] = chat_output_json["object_relation"]
                             output_dict["reason"] = chat_output_json["reason"]
@@ -823,7 +820,7 @@ def build_scenegraph(args):
 
 def generate_scenegraph_json(args):
     from conceptgraph.slam.slam_classes import MapObjectList
-    
+
 
     # Generate the JSON file summarizing the scene, if it doesn't exist already
     # or if the --recopmute_scenegraph_json flag is set
@@ -954,7 +951,7 @@ def annotate_scenegraph(args):
 def main():
     # Process command-line args (if any)
     args = tyro.cli(ProgramArgs)
-    
+
     # print using masking option
     print(f"args.masking_option: {args.masking_option}")
 

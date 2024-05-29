@@ -70,9 +70,9 @@ merge_text_sim_thresh: 0.7     # Merge only if the text cosine sim is larger
 # Periodically perform post-process operations every k frame
 # -1 means not perform them during the run. They are performed at the end anyway. 
 
-denoise_interval: 20           # Run DBSCAN every k frame. This operation is heavy
-filter_interval: -1            # Filter objects that have too few associations or are too small
-merge_interval: -1             # Merge objects based on geometric and semantic similarity
+denoise_interval: 5           # Run DBSCAN every k frame. This operation is heavy
+filter_interval: 5            # Filter objects that have too few associations or are too small
+merge_interval: 5             # Merge objects based on geometric and semantic similarity
 run_denoise_final_frame: !!bool True
 run_filter_final_frame: !!bool True
 run_merge_final_frame: !!bool True

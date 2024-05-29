@@ -159,7 +159,7 @@ def merge_obj_matches(
     tracker.increment_total_objects(len(objects) - temp_curr_object_count)
     # wandb.log({"merges_this_frame" :len(match_indices) - match_indices.count(None)})
     # wandb.log({"total_merges": tracker.total_merges})
-    wandb.log(
+    owandb.log(
         {
             "merges_this_frame": len(match_indices) - match_indices.count(None),
             "total_merges": tracker.total_merges,

@@ -707,7 +707,7 @@ def filter_objects(
         if len(obj["pcd"].points) >= obj_min_points and obj["num_detections"] >= obj_min_detections:
             objects_to_keep.append(obj)
             if map_edges is not None:
-            new_index_map[index] = len(objects_to_keep) - 1
+                new_index_map[index] = len(objects_to_keep) - 1
 
     # Create a new MapObjectList from the kept objects
     new_objects = MapObjectList(objects_to_keep)

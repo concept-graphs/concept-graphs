@@ -1,7 +1,7 @@
 defaults:
   - base
   - base_mapping
-  - record3d # replica
+  - replica
   - sam
   - classes
   - logging_level
@@ -18,7 +18,7 @@ exp_suffix: s_mapping_stride50_1
 save_video: !!bool True
 save_objects_all_frames: !!bool True
 # merge_interval: 5
-denoise_interval: 5
+#denoise_interval: 5
 # log_level: INFO
 downsample_voxel_size: 0.01
 obj_pcd_max_points: 10000

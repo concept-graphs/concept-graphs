@@ -272,7 +272,7 @@ def extract_node_captions(args):
 
     # Creating a namespace object to pass args to the LLaVA chat object
     chat_args = SimpleNamespace()
-    chat_args.model_path = os.getenv("LLAVA_MODEL_PATH")
+    chat_args.model_path = os.getenv("LLAVA_CKPT_PATH")
     chat_args.conv_mode = "v0_mmtag" # "multimodal"
     chat_args.num_gpus = 1
 

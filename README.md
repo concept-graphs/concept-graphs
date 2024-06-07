@@ -126,12 +126,12 @@ pip install -e .
 
 ### Set up LLaVA (used for scene graph generation)
 
-Follow the instructions on the [LLaVA repo](https://github.com/haotian-liu/LLaVA) to set it up. You also need to prepare the LLaVA checkpoints and save them to `$LLAVA_MODEL_PATH`. We have tested with model checkpoint `LLaVA-7B-v0` and [LLaVA code](https://github.com/haotian-liu/LLaVA) at this [commit](https://github.com/haotian-liu/LLaVA/commit/8fc54a09a6be74b2abd913c468fb3d42ae826194). LLaVA codebase at later commits may require some adaptations.
+Follow the instructions on the [LLaVA repo](https://github.com/haotian-liu/LLaVA) to set it up. You also need to prepare the LLaVA checkpoints and save them to `$LLAVA_CKPT_PATH`. We have tested with model checkpoint `LLaVA-7B-v0` and [LLaVA code](https://github.com/haotian-liu/LLaVA) at this [commit](https://github.com/haotian-liu/LLaVA/commit/8fc54a09a6be74b2abd913c468fb3d42ae826194). LLaVA codebase at later commits may require some adaptations.
 
 ```bash
 # Set the env variables as follows (change the paths accordingly)
 export LLAVA_PYTHON_PATH=/path/to/llava
-export LLAVA_MODEL_PATH=/path/to/LLaVA-7B-v0
+export LLAVA_CKPT_PATH=/path/to/LLaVA-7B-v0
 ```
 
 ## Prepare dataset (Replica as an example)

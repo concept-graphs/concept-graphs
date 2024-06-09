@@ -28,15 +28,6 @@ from scipy.sparse.csgraph import connected_components, minimum_spanning_tree
 from tqdm import tqdm, trange
 from transformers import logging as hf_logging
 
-# from mappingutils import (
-#     MapObjectList,
-#     compute_3d_giou_accuracte_batch,
-#     compute_3d_iou_accuracte_batch,
-#     compute_iou_batch,
-#     compute_overlap_matrix_faiss,
-#     num_points_closer_than_threshold_batch,
-# )
-
 torch.autograd.set_grad_enabled(False)
 hf_logging.set_verbosity_error()
 

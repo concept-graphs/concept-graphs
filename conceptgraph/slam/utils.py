@@ -291,7 +291,7 @@ def merge_obj2_into_obj1(obj1, obj2, downsample_voxel_size, dbscan_remove_noise,
     tracker.track_merge(obj1, obj2)
     
     # Attributes to be explicitly handled
-    extend_attributes = ['image_idx', 'mask_idx', 'color_path', 'class_id', 'mask', 'xyxy', 'conf', 'contain_number']
+    extend_attributes = ['image_idx', 'mask_idx', 'color_path', 'class_id', 'mask', 'xyxy', 'conf', 'contain_number', 'captions']
     add_attributes = ['num_detections', 'num_obj_in_class']
     skip_attributes = ['id', 'class_name', 'is_background', 'new_counter', 'curr_obj_num', 'inst_color']  # 'inst_color' just keeps obj1's
     custom_handled = ['pcd', 'bbox', 'clip_ft', 'text_ft', 'n_points']
@@ -707,7 +707,7 @@ def filter_objects(
         if len(obj["pcd"].points) >= obj_min_points and obj["num_detections"] >= obj_min_detections:
             objects_to_keep.append(obj)
             if map_edges is not None:
-            new_index_map[index] = len(objects_to_keep) - 1
+                new_index_map[index] = len(objects_to_keep) - 1
 
     # Create a new MapObjectList from the kept objects
     new_objects = MapObjectList(objects_to_keep)
@@ -794,6 +794,32 @@ def merge_objects(
         return objects, map_edges
     else:
         return objects
+    
+def filter_captions(captions, detection_class_labels):
+    # Create a dictionary to map id to the index in the captions list
+    captions_index = {item['id']: index for index, item in enumerate(captions)}
+    
+    # Initialize a new list to store the cleaned and matched captions
+    new_captions = []
+    
+    # Process each detection class label
+    for label in detection_class_labels:
+        # Split the label by spaces
+        parts = label.split()
+        # The last part is the id
+        id_str = parts[-1]
+        # The rest are the name
+        name = ' '.join(parts[:-1])
+        
+        # Check if the id exists in the captions dictionary
+        if id_str in captions_index:
+            # Add the caption from the captions list to the new list
+            new_captions.append(captions[captions_index[id_str]])
+        else:
+            # Add a new entry with a None caption
+            new_captions.append({"id": id_str, "name": name, "caption": None})
+    
+    return new_captions
 
 
 # @profile
@@ -850,7 +876,7 @@ def filter_gobs(
     for attribute in gobs.keys():
         if isinstance(gobs[attribute], str) or attribute == "classes":  # Captions
             continue
-        if attribute in ['labels', 'edges', 'text_feats']:
+        if attribute in ['labels', 'edges', 'text_feats', 'captions']:
             # Note: this statement was used to also exempt 'detection_class_labels' but that causes a bug. It causes the edges to be misalgined with the objects.
             continue
         elif isinstance(gobs[attribute], list):
@@ -859,6 +885,9 @@ def filter_gobs(
             gobs[attribute] = gobs[attribute][idx_to_keep]
         else:
             raise NotImplementedError(f"Unhandled type {type(gobs[attribute])}")
+        
+    filtered_captions = filter_captions(gobs['captions'], gobs['detection_class_labels'])
+    gobs['captions'] = filtered_captions
 
     return gobs
 
@@ -1066,6 +1095,7 @@ def make_detection_list_from_pcd_and_gobs(
             'color_path' : [color_path],                     # path to the RGB image
             'class_name' : curr_class_name,                         # global class id for this detection
             'class_id' : [curr_class_idx],                         # global class id for this detection
+            'captions' : [gobs['captions'][mask_idx]],           # captions for this detection
             'num_detections' : 1,                            # number of detections in this object
             'mask': [gobs['mask'][mask_idx]],
             'xyxy': [gobs['xyxy'][mask_idx]],

@@ -51,7 +51,7 @@ from conceptgraph.utils.general_utils import (
     handle_rerun_saving, 
     load_saved_detections, 
     load_saved_hydra_json_config, 
-    make_vlm_edges, 
+    make_vlm_edges_and_captions, 
     measure_time, 
     save_detection_results, 
     save_hydra_config, 

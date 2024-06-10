@@ -292,8 +292,8 @@ def plot_edges_from_vlm(image: np.ndarray, edges, detections: sv.Detections, obj
     # Draw edges based on relationships specified
     for edge in edges:
         src_label, _, dst_label = edge
-        src_label = src_label.split(' ')[-1]  # Assuming label format is 'object X'
-        dst_label = dst_label.split(' ')[-1]  # Assuming label format is 'object X'
+        src_label = str(src_label) # Assuming label is int of object_index
+        dst_label = str(dst_label)
         if src_label in label_to_centroid_color and dst_label in label_to_centroid_color:
             src_centroid, _ = label_to_centroid_color[src_label]
             dst_centroid, dst_color = label_to_centroid_color[dst_label]

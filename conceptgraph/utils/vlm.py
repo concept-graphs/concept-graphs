@@ -39,14 +39,14 @@ In the images, each object is annotated with a bright numeric id (i.e. a number)
 
 Note that you are describing the **physical relationships** between the **objects inside** the image.
 
-You will also be given a text list of the numeric ids of the objects in the image. The list will be in the format: ["object 1", "object 2", "object 3" ...], only output the physical relationships between the objects in the list.
+You will also be given a text list of the numeric ids of the objects in the image. The list will be in the format: ["1: name1", "2: name2", "3: name3" ...], only output the physical relationships between the objects in the list.
 
 The relation types you must report are:
 - phyically placed on top of: ("object x", "on top of", "object y") 
 - phyically placed underneath: ("object x", "under", "object y") 
 
 An illustrative example of the expected response format might look like this:
-[("object 1", "on top of", "object 2"), ("object 3", "under", "object 2"), ("object 4", "on top of", "object 3")]
+[("object 1", "on top of", "object 2"), ("object 3", "under", "object 2"), ("object 4", "on top of", "object 3")]. Do not put the names of the objects in your response, only the numeric ids.
 
 Do not include any other information in your response. Only output a parsable list of tuples describing the given physical relationships between objects in the image.
 '''

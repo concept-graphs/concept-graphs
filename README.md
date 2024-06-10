@@ -238,6 +238,15 @@ That's all for now, we will keep updating this README with more information as w
 
 To stop a script early, you can use the `concept-graphs/conceptgraph/hydra_configs/early_exit.json` file. If you set `early_exit: true` in the file, then the script will exit early after the current iteration is finished. This is useful if you want to stop the script early, but still save the results from the current iteration.
 
+# Classes File
+
+The classes file is used as a set of class labels to the object detection model. This is a tradeoff between sacrificing some "open-vocabulary-ness" for more stable detections. We have two classes files avaiable:
+```bash
+concept-graphs/conceptgraph/scannet200_classes.txt
+concept-graphs/conceptgraph/ram_classes_4500.txt
+```
+The scannet classes are the labels from the [scannet200 dataset](https://rozdavid.github.io/scannet200).
+The ram classes are the tags from the [RAM model](https://recognize-anything.github.io/).
 
 ## Troubleshooting
 

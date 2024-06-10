@@ -169,11 +169,12 @@ class MapObjectList(DetectionList):
 
 # not sure if I will use this 
 class MapEdge():
-    def __init__(self, obj1_idx, obj2_idx, rel_type, num_detections=1):
+    def __init__(self, obj1_idx, obj2_idx, rel_type, num_detections=1, first_detected=None):
         self.obj1_idx = obj1_idx
         self.obj2_idx = obj2_idx
         self.rel_type = rel_type
         self.num_detections = num_detections
+        self.first_detected = first_detected # frame index that the object was first detected 
         
     def to_serializable(self):
         return {
@@ -199,7 +200,7 @@ class MapEdgeMapping:
         self.edges_by_index = {}  # {(obj1_index, obj2_index): MapEdge}
         self.edges_by_uuid = {}  # {(obj1_uuid, obj2_uuid): MapEdge}
 
-    def add_or_update_edge(self, obj1_index, obj2_index, rel_type):
+    def add_or_update_edge(self, obj1_index, obj2_index, rel_type, first_detected=None):
         obj1_uuid, obj2_uuid = self.objects[obj1_index]['id'], self.objects[obj2_index]['id']
         uuid_key = (obj1_uuid, obj2_uuid)
         
@@ -211,9 +212,28 @@ class MapEdgeMapping:
             edge = self.edges_by_index[(obj1_index, obj2_index)]
             edge.num_detections += 1
         else:
-            edge = MapEdge(obj1_index, obj2_index, rel_type)
+            edge = MapEdge(obj1_index, obj2_index, rel_type, first_detected=first_detected)
             self.edges_by_index[(obj1_index, obj2_index)] = edge
             self.edges_by_uuid[uuid_key] = edge
+            
+    def delete_edge(self, obj1_index, obj2_index):
+        # Check if the edge exists
+        if (obj1_index, obj2_index) in self.edges_by_index:
+            # Get the UUIDs of the objects
+            obj1_uuid = self.objects[obj1_index]['id']
+            obj2_uuid = self.objects[obj2_index]['id']
+            uuid_key = (obj1_uuid, obj2_uuid)
+
+            # Remove the edge from both index-based and UUID-based dictionaries
+            del self.edges_by_index[(obj1_index, obj2_index)]
+            if uuid_key in self.edges_by_uuid:
+                del self.edges_by_uuid[uuid_key]
+            else:
+                # If the edge is not found in the UUID-based dictionary, print a warning
+                print(f"Edge between {obj1_index} and {obj2_index} not found in UUID-based storage.")
+            print(f"Edge between {obj1_index} and {obj2_index} deleted successfully.")
+        else:
+            print(f"Edge between {obj1_index} and {obj2_index} does not exist.")
 
     def delete_object_edges(self, obj_index):
         # Remove all edges associated with the object at obj_index

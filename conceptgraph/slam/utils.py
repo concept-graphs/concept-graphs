@@ -847,17 +847,18 @@ def filter_gobs(
     # for key in gobs.keys():
     #     print(key, type(gobs[key]), len(gobs[key]))
 
-    for k in gobs.keys():
-        if isinstance(gobs[k], str) or k == "classes":  # Captions
+    for attribute in gobs.keys():
+        if isinstance(gobs[attribute], str) or attribute == "classes":  # Captions
             continue
-        if k in ['labels', 'edges', 'detection_class_labels', 'text_feats']:
+        if attribute in ['labels', 'edges', 'text_feats']:
+            # Note: this statement was used to also exempt 'detection_class_names' but that causes a bug. It causes the edges to be misalgined with the objects.
             continue
-        elif isinstance(gobs[k], list):
-            gobs[k] = [gobs[k][i] for i in idx_to_keep]
-        elif isinstance(gobs[k], np.ndarray):
-            gobs[k] = gobs[k][idx_to_keep]
+        elif isinstance(gobs[attribute], list):
+            gobs[attribute] = [gobs[attribute][i] for i in idx_to_keep]
+        elif isinstance(gobs[attribute], np.ndarray):
+            gobs[attribute] = gobs[attribute][idx_to_keep]
         else:
-            raise NotImplementedError(f"Unhandled type {type(gobs[k])}")
+            raise NotImplementedError(f"Unhandled type {type(gobs[attribute])}")
 
     return gobs
 
@@ -1338,7 +1339,7 @@ def prepare_objects_save_vis(objects: MapObjectList, downsample_size: float=0.02
                 
     return objects_to_save.to_serializable()
 
-def process_edges(match_indices, gobs, initial_objects_count, objects, map_edges):
+def process_edges(match_indices, gobs, initial_objects_count, objects, map_edges, frame_idx):
     # Step 1: Generate match_indices_w_new_obj with indices for new objects
     # Initial count of objects before processing new detections
     new_object_count = 0  # Counter for new objects
@@ -1354,22 +1355,18 @@ def process_edges(match_indices, gobs, initial_objects_count, objects, map_edges
         else:
             match_indices_w_new_obj.append(match_index)
 
-    # Step 2: Create a mapping from 2D detection labels to detection indices
-    detection_label_to_index = {label: index for index, label in enumerate(gobs['detection_class_labels'])}
+    # Step 2: Create a mapping from detection_class_labels numbers to the detection_list indices
+    detection_label_to_index = {}
+    for index, detection_class_label in enumerate(gobs['detection_class_labels']):
+        label_key = detection_class_label.split(" ")[-1]
+        detection_label_to_index[label_key] = index
     
     # Step 3: Use match_indices_w_new_obj for translating 2D edges to indices in the existing objects list
     curr_edges_3d_by_index = []
     for edge in gobs['edges']:
         obj1_label, relation, obj2_label = edge
-        obj1_index = int(obj1_label.split(" ")[-1])
-        obj2_index = int(obj2_label.split(" ")[-1])
-        
-        # check that the indices are not None
-        if (obj1_index is None) or (obj2_index is None):
-            k=1
-            # sometimes gpt4v returns a relation with a class that is not in the detections
-            continue
-        
+        obj1_index = detection_label_to_index.get(obj1_label, None)
+        obj2_index = detection_label_to_index.get(obj2_label, None)        
         
         # check that the object indices are not out of range
         if (obj1_index is None) or (obj1_index >= len(match_indices_w_new_obj)):
@@ -1392,7 +1389,7 @@ def process_edges(match_indices, gobs, initial_objects_count, objects, map_edges
     for (obj_1_idx, rel_type, obj_2_idx) in curr_edges_3d_by_index:
         if obj_1_idx == obj_2_idx: # skip loop edges
             continue
-        map_edges.add_or_update_edge(obj_1_idx, obj_2_idx, rel_type)
+        map_edges.add_or_update_edge(obj_1_idx, obj_2_idx, rel_type, frame_idx)
         
     # Just making a copy of the edges by object number for viz
     map_edges_by_curr_obj_num = []

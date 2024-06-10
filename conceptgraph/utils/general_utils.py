@@ -13,6 +13,7 @@ import supervision as sv
 import scipy.ndimage as ndi 
 from conceptgraph.utils.vlm import get_obj_rel_from_image_gpt4v
 import cv2
+import re
 
 
 from omegaconf import OmegaConf
@@ -157,8 +158,8 @@ def annotate_for_vlm(
     color: tuple=(0, 255, 0), 
     thickness: int=2, 
     text_color: tuple=(255, 255, 255), 
-    text_scale: float=0.5, 
-    text_thickness: int=3, 
+    text_scale: float=0.6, 
+    text_thickness: int=2, 
     text_bg_color: tuple=(255, 255, 255), 
     text_bg_opacity: float=0.95,  # Opacity from 0 (transparent) to 1 (opaque)
     small_mask_threshold = 0.002,
@@ -186,6 +187,7 @@ def annotate_for_vlm(
         mask = detections_mask[i]
         label = labels[i]
         label_num = label.split(" ")[-1]
+        label_name = re.sub(r'\s*\d+$', '', label).strip()
         bbox = detections.xyxy[i]
         
         obj_color = obj_classes.get_class_color(int(detections.class_id[i]))
@@ -213,7 +215,7 @@ def annotate_for_vlm(
             x_center, y_center = int(x_center), int(y_center)
 
         # Prepare text background
-        text = label_num
+        text = label_num + ": " + label_name 
         (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, text_scale, text_thickness)
         text_x_left = x_center - text_width // 2
         text_y_top = y_center + (text_height) // 2
@@ -443,11 +445,17 @@ def make_vlm_edges(image, curr_det, obj_classes, detection_class_labels, det_exp
         vis_save_path_for_vlm_edges = get_vlm_annotated_image_path(det_exp_vis_path, color_path, w_edges=True)
         annotated_image_for_vlm, sorted_indices = annotate_for_vlm(image, filtered_detections, obj_classes, labels, save_path=vis_save_path_for_vlm)
 
-        label_nums = [f"object {str(label.split(' ')[-1])}" for label in labels]
+        label_list = []
+        for label in labels:
+            label_num = str(label.split(" ")[-1])
+            label_name = re.sub(r'\s*\d+$', '', label).strip()
+            full_label = f"{label_num}: {label_name}"
+            label_list.append(full_label)
+
         cv2.imwrite(str(vis_save_path_for_vlm), annotated_image_for_vlm)
         print(f"Line 313, vis_save_path_for_vlm: {vis_save_path_for_vlm}")
         
-        edges = get_obj_rel_from_image_gpt4v(openai_client, vis_save_path_for_vlm, label_nums)
+        edges = get_obj_rel_from_image_gpt4v(openai_client, vis_save_path_for_vlm, label_list)
         edge_image = plot_edges_from_vlm(annotated_image_for_vlm, edges, filtered_detections, obj_classes, labels, sorted_indices, save_path=vis_save_path_for_vlm_edges)
     
     return labels, edges, edge_image
@@ -652,6 +660,79 @@ class ObjectClasses:
         Returns a dictionary of class colors, just like self.class_to_color, but indexed by class index.
         """
         return {str(i): self.get_class_color(i) for i in range(len(self.classes))}
+    
+def save_obj_json(exp_suffix, exp_out_path, objects):
+    """
+    Saves the objects to a JSON file with the specified suffix.
+
+    Args:
+    - exp_suffix (str): Suffix for the experiment, used in naming the saved file.
+    - exp_out_path (Path or str): Output path for the experiment's saved files.
+    - objects: The objects to save, assumed to have necessary attributes.
+    """
+    json_obj_list = {}
+    for curr_idx, curr_obj in enumerate(objects):
+        obj_key = f"object_{curr_idx + 1}"
+        bbox_extent = [round(val, 2) for val in curr_obj['bbox'].extent]  # Round values to 2 decimal places
+        bbox_center = [round(val, 2) for val in curr_obj['bbox'].center]  # Assuming `center` is an iterable like a list or tuple
+        bbox_volume = round(bbox_extent[0] * bbox_extent[1] * bbox_extent[2], 2)  # Calculate volume and round to 2 decimal places
+        
+        obj_dict = {
+            "id": curr_obj['curr_obj_num'],
+            "object_tag": curr_obj['class_name'],
+            "bbox_extent": bbox_extent,
+            "bbox_center": bbox_center,
+            "bbox_volume": bbox_volume  # Add the volume to the dictionary
+        }
+        json_obj_list[obj_key] = obj_dict
+        
+    json_obj_out_path = Path(exp_out_path) / f"obj_json_{exp_suffix}.json"
+    json_obj_out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(json_obj_out_path, "w") as f:
+        json.dump(json_obj_list, f, indent=2)
+    print(f"Saved object JSON to {json_obj_out_path}")
+    
+
+def save_edge_json(exp_suffix, exp_out_path, objects, edges):
+    """
+    Saves the edges to a JSON file with the specified suffix.
+
+    Args:
+    - exp_suffix (str): Suffix for the experiment, used in naming the saved file.
+    - exp_out_path (Path or str): Output path for the experiment's saved files.
+    - objects: The objects involved in the edges.
+    - edges: The edges to save, assumed to have necessary attributes.
+    """
+    json_edge_list = {}
+    for curr_idx, curr_edge_item in enumerate(list(edges.edges_by_index.items())):
+        curr_edj_tup, curr_edge = curr_edge_item
+        obj1_idx = curr_edge.obj1_idx
+        obj2_idx = curr_edge.obj2_idx
+        rel_type = curr_edge.rel_type
+        num_det = curr_edge.num_detections
+        obj1_class_name = objects[obj1_idx]['class_name'] 
+        obj2_class_name = objects[obj2_idx]['class_name']
+        obj1_curr_obj_num = objects[obj1_idx]['curr_obj_num']
+        obj2_curr_obj_num = objects[obj2_idx]['curr_obj_num']
+        # print(f"Line 732, {obj1_class_name} {rel_type} {obj2_class_name}, num_det: {num_det}")
+        
+        edj_dict = {
+            "edge_id": curr_idx,
+            "edge_description": f"{obj1_class_name} {rel_type} {obj2_class_name}",
+            "num_detections": num_det,
+            "object_1_id": obj1_curr_obj_num,
+            "object_1_tag": obj1_class_name,
+            "object_2_id": obj2_curr_obj_num,
+            "object_2_tag": obj2_class_name,
+            "relationship": rel_type,
+        }
+        json_edge_list[f"edge_{curr_idx}"] = edj_dict
+        
+    json_edge_out_path = Path(exp_out_path) / f"edge_json_{exp_suffix}.json"
+    json_edge_out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(json_edge_out_path, "w") as f:
+        json.dump(json_edge_list, f, indent=2)
+    print(f"Saved edge JSON to {json_edge_out_path}")
 
 
 def save_pointcloud(exp_suffix, exp_out_path, cfg, objects, obj_classes, latest_pcd_filepath=None, create_symlink=True, edges = None):

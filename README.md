@@ -28,6 +28,119 @@ This repository contains the code for the ConceptGraphs project. ConceptGraphs b
 
 ![Splash Figure](./assets/splash-final.png)
 
+## Getting Started Video Tutorial 
+
+This 1.5 hours long Youtube video is detailed getting started tutorial covering the README below as of May 7, 2024. In it, I start with a blank ubuntu 20.04, and setup ConceptGraphs, and make a map using the replica dataset and an iPhone scan. Also covers the direct streaming option! I decided to be extra detailed just in case, so feel free to skip over / through the parts that are too slow for you.
+
+[![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/56jEFyrqqpo/0.jpg)](https://www.youtube.com/watch?v=56jEFyrqqpo)
+
+<details >
+<summary>Video Chapters (Dropdown) </summary>
+<br>
+  
+0:00 Welcome Introduction
+
+1:09 Tutorial Starts
+
+1:58 Download Dataset
+
+3:17 Conda Env Setup Starts
+
+9:32 Setting CUDA_HOME env variable
+
+14:18 Install ali-dev ConceptGraphs into conda env
+
+16:39 Build map w Replica Dataset starts
+
+18:38 Weird Indent Error
+
+19:27 Config Setup and Related Errors Explanation starts
+
+21:13 Hydra Config Composition explained
+
+25:00 Setting repo_root and data_root in base_paths YAML
+
+27:25 Initial Overview of mapping script
+
+29:02 Changing SAM to MobileSAM
+
+30:27 Commenting out openai api for now
+
+31:48 Overview of changes so far
+
+32:09 Initial look at Rerun window
+
+33:44 Overview of changes so far part 2
+
+35:01 Stopping the map building early explained
+
+35:32 Saving the Rerun data
+
+37:52 Saving the map
+
+38:33 last_pcd_save Symbolic Link Explained
+
+39:42 Exploring the Finished Experiment Folder
+
+42:40 Saved param file for the Experiment
+
+45:00 Searching the map with natural language queries
+
+48:42 Overview of changes so far part 3
+
+50:10 Reusing detections
+
+52:21 Showing off Rerun Visualization features
+
+54:43 Incomplete Dataset Reuse Issue
+
+55:38 Summary and Recap So far
+
+56:19 Using an iPhone as RGB-D sensor starts
+
+56:46 Record3D app explained
+
+57:49 Setting up and extracting r3d file dataset
+
+59:31 Preprocessing extracted r3d dataset 
+
+1:01:42 Missing dependencies fix 
+
+1:04:31 Building and saving  map with iPhone dataset
+
+1:09:41 Searching the co_store map with natural language queries
+
+1:10:56 Streaming data directly from iPhone explanation starts 
+
+1:14:10 Installing record3D git repo and cmake
+
+1:18:29 setting up OpenAI API key env variable  
+
+1:20:03 Streaming directly from iPhone working 
+
+1:22:21 Searching the streamed iPhone map with natural language queries
+
+1:23:41 Edges explanation starts
+
+1:24:58 Building a map with edges and using the VSCode Debugger starts
+
+1:25:22 Explaining the VSCode launch.json debug config
+
+1:27:21 Building a map with Edges
+
+1:29:17 Summary and recap of video and changes so far
+
+1:30:28 High level overview of main mapping script
+
+1:35:19 How to use the VSCode debugger
+
+1:37:12 Summary and recap of video and changes so far part 2
+
+1:37:49 Outro and goodbye
+
+</details>
+
+
 ## Installation
 
 ### Code
@@ -60,7 +173,7 @@ conda install https://anaconda.org/pytorch3d/pytorch3d/0.7.4/download/linux-64/p
 conda install -c conda-forge cudatoolkit-dev
 
 # Install the other required libraries
-pip install tyro open_clip_torch wandb h5py openai hydra-core distinctipy ultralytics dill supervision open3d imageio natsort kornia rerun-sdk git+https://github.com/ultralytics/CLIP.git
+pip install tyro open_clip_torch wandb h5py openai hydra-core distinctipy ultralytics dill supervision open3d imageio natsort kornia rerun-sdk pyliblzfse pypng git+https://github.com/ultralytics/CLIP.git
 
 # You also need to ensure that the installed packages can find the right cuda installation.
 # You can do this by setting the CUDA_HOME environment variable.
@@ -79,6 +192,7 @@ pip install -e .
 
 ### Datasets
 
+#### Replica 
 Now you will need some data to run the code on, the easiest one to use is the [Replica](https://github.com/facebookresearch/Replica-Dataset). You can install it by using the following commands:
 
 ```bash
@@ -89,6 +203,7 @@ wget https://cvg-data.inf.ethz.ch/nice-slam/data/Replica.zip
 unzip Replica.zip
 ```
 
+#### iPhone scan via Record 3D app (r3d file) of a convenience store aisle
 I've also uploaded a scan I took of a convenience store with a lot of objects, you can download that from Kaggle via [this link](https://www.kaggle.com/datasets/alihkw/convinience-store-recording-via-the-record3d-app/). This is a record3d file `.r3d` that we will need to preprocess before we can use it as a dataset. More on that below.
 
 And now you will need to update the paths in the configuration files in the `conceptgraph/hydra_configs` directory to point to your paths. Which is discussed below:
@@ -232,7 +347,46 @@ And then we can type `cabinet` and press enter, and the point cloud will be colo
 
 ![CabinetSearch](./assets/cg_cabinet_search.jpeg)
 
-That's all for now, we will keep updating this README with more information as we go.
+## Using an iPhone as your RGB-D sensor
+
+For this, you'll need to use the Record3D app and buy the premium version which costs arouund $5-10. The scans you make using the app can be exported to an `.r3d` file. You can then use googledrive or a usb cable or something else to get the `.r3d` file on to your computer. Then right click -> extract out it's contents into a folder, and you'll probably wanna rename the folder to a convenient name. 
+
+
+Then you want to use the `concept-graphs/conceptgraph/dataset/preprocess_r3d_file.py` to convert that into a dataset that conceptgraphs can use. This is also covered in the getting started video. In the `preprocess_r3d_file.py`, set the datapath variable to your extracted r3d folder. So for me it is:
+
+```
+class ProgramArgs:
+    # this folder contains the metadata folder and the rgb folder etc inside it
+    datapath = "/home/kuwajerw/local_data/record3d_scans/co_store" 
+```
+
+Let that script run, and now you'll have a folder called `/home/kuwajerw/local_data/record3d_scans/co_store_preprocessed` which you can use with ConceptGraphs, for which you can follow the same instructions as the Replica dataset.
+
+
+
+## Streaming the map directly from an iPhone as you're doing the scan
+
+If you'd like to skip the dataset making process and build the map in near real time as you're recording the scan, you can use the `concept-graphs/conceptgraph/slam/r3d_stream_rerun_realtime_mapping.py` script for that, it's also covered in the getting started video. First you need to setup the record3D git repo, which requires installing cmake. After that, simply use the [USB streaming option](https://record3d.app/features) in the Record3D app, and then run the `r3d_stream_rerun_realtime_mapping.py` script to start building the map immediately. So that's:
+```
+sudo apt install cmake
+```
+and then, with your `conceptgraph` conda environment active, run these commands from the record3D github [README file](https://github.com/marek-simonik/record3d?tab=readme-ov-file#python)
+```
+git clone https://github.com/marek-simonik/record3d
+cd record3d
+python setup.py install
+```
+and now you can run the `r3d_stream_rerun_realtime_mapping.py` same as the previous scripts. Of course, you will have to have the iPhone streaming via USB to your computer at the same time when you run the script.
+```bash
+cd /path/to/code/concept-graphs/conceptgraph/
+python /slam/r3d_stream_rerun_realtime_mapping.py
+```
+
+## Debugging
+
+We've commited a pre-made vscode debug config file to the repo to make debugging simple. You can find it at `concept-graphs/.vscode/launch.json`. Here you'll find launch commands to run the core scripts talked about in this README. If you're not familiar with the vscode debugger, check out the getting started video, or the vscode [docs](https://code.visualstudio.com/docs/python/debugging).
+
+
 
 ## Misc
 
@@ -248,6 +402,7 @@ concept-graphs/conceptgraph/ram_classes_4500.txt
 The scannet classes are the labels from the [scannet200 dataset](https://rozdavid.github.io/scannet200).
 The ram classes are the tags from the [RAM model](https://recognize-anything.github.io/).
 
+
 ## Troubleshooting
 
 Sometimes for X11 or Qt related errors, I had to put this in my bashrc file to fix it 
@@ -256,481 +411,4 @@ Sometimes for X11 or Qt related errors, I had to put this in my bashrc file to f
 export XKB_CONFIG_ROOT=/usr/share/X11/xkb
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# OLD README FOR CONCEPTGRAPHS BELOW 
-
-# ConceptGraphs: Open-Vocabulary 3D Scene Graphs for Perception and Planning
-
-[**Project Page**](https://concept-graphs.github.io/) |
-[**Paper**](https://concept-graphs.github.io/assets/pdf/2023-ConceptGraphs.pdf) |
-[**ArXiv**](https://arxiv.org/abs/2309.16650) |
-[**Video**](https://www.youtube.com/watch?v=mRhNkQwRYnc&feature=youtu.be&ab_channel=AliK)
-
-
-[Qiao Gu](https://georgegu1997.github.io/)\*,
-[Ali Kuwajerwala](https://www.alihkw.com/)\*,
-[Sacha Morin](https://sachamorin.github.io/)\*,
-[Krishna Murthy Jatavallabhula](https://krrish94.github.io/)\*,
-[Bipasha Sen](https://bipashasen.github.io/),
-[Aditya Agarwal](https://skymanaditya1.github.io/),
-[Corban Rivera](https://www.jhuapl.edu/work/our-organization/research-and-exploratory-development/red-staff-directory/corban-rivera),
-[William Paul](https://scholar.google.com/citations?user=92bmh84AAAAJ),
-[Kirsty Ellis](https://mila.quebec/en/person/kirsty-ellis/),
-[Rama Chellappa](https://engineering.jhu.edu/faculty/rama-chellappa/),
-[Chuang Gan](https://people.csail.mit.edu/ganchuang/),
-[Celso Miguel de Melo](https://celsodemelo.net/),
-[Joshua B. Tenenbaum](http://web.mit.edu/cocosci/josh.html),
-[Antonio Torralba](https://groups.csail.mit.edu/vision/torralbalab/),
-[Florian Shkurti](http://www.cs.toronto.edu//~florian/),
-[Liam Paull](http://liampaull.ca/)
-
-![Splash Figure](./assets/splash-final.png)
-
-
-## Setup
-
-The env variables needed can be found in `env_vars.bash.template`. When following the setup guide below, you can duplicate that files and change the variables accordingly for easy setup. 
-
-### Install the required libraries
-
-We recommend setting up a virtual environment using virtualenv or conda. Our code has been tested with Python 3.10.12. It may also work with other later versions. We also provide the `environment.yml` file for Conda users. In generaly, directly installing conda env using `.yml` file may cause some unexpected issues, so we recommand setting up the environment by the following instructions and only using the `.yml` file as a reference. 
-
-Sample instructions for `conda` users. 
-
-```bash
-conda create -n conceptgraph anaconda python=3.10
-conda activate conceptgraph
-
-# Install the required libraries
-pip install tyro open_clip_torch wandb h5py openai hydra-core distinctipy
-
-# for yolo
-pip install ultralytics
-
-pip install supervision
-
-# Install the Faiss library (CPU version should be fine)
-conda install -c pytorch faiss-cpu=1.7.4 mkl=2021 blas=1.0=mkl
-
-##### Install Pytorch according to your own setup #####
-# For example, if you have a GPU with CUDA 11.8 (We tested it Pytorch 2.0.1)
-conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=11.8 -c pytorch -c nvidia
-
-# Install Pytorch3D (https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md)
-# conda install pytorch3d -c pytorch3d # This detects a conflict. You can use the command below, maybe with a different version
-conda install https://anaconda.org/pytorch3d/pytorch3d/0.7.4/download/linux-64/pytorch3d-0.7.4-py310_cu118_pyt201.tar.bz2
-
-# Install the gradslam package and its dependencies
-git clone https://github.com/krrish94/chamferdist.git
-cd chamferdist
-pip install .
-cd ..
-git clone https://github.com/gradslam/gradslam.git
-cd gradslam
-git checkout conceptfusion
-pip install .
-```
-
-### Install [Grounded-SAM](https://github.com/IDEA-Research/Grounded-Segment-Anything) package
-
-Follow the instructions on the original [repo](https://github.com/IDEA-Research/Grounded-Segment-Anything#install-without-docker). ConceptGraphs has been tested with the codebase at this [commit](https://github.com/IDEA-Research/Grounded-Segment-Anything/commit/a4d76a2b55e348943cba4cd57d7553c354296223). Grounded-SAM codebase at later commits may require some adaptations. 
-
-First checkout the package by 
-
-```bash
-git clone git@github.com:IDEA-Research/Grounded-Segment-Anything.git
-```
-
-Then, install the package Following the commands listed in the original GitHub repo. You can skip the `Install osx` step and the "optional dependencies". 
-
-During this process, you will need to set the `CUDA_HOME` to be where the CUDA toolkit is installed. 
-The CUDA tookit can be set up system-wide or within a conda environment. We tested it within a conda environment, i.e. installing [cudatoolkit-dev](https://anaconda.org/conda-forge/cudatoolkit-dev) using conda. 
-
-```bash
-# i.e. You can install cuda toolkit using conda
-conda install -c conda-forge cudatoolkit-dev
-
-# and you need to replace `export CUDA_HOME=/path/to/cuda-11.3/` by 
-export CUDA_HOME=/path/to/anaconda3/envs/conceptgraph/
-```
-
-You also need to download `ram_swin_large_14m.pth`, `groundingdino_swint_ogc.pth`, `sam_vit_h_4b8939.pth` (and optionally `tag2text_swin_14m.pth` if you want to try Tag2Text) following the instruction [here](https://github.com/IDEA-Research/Grounded-Segment-Anything#label-grounded-sam-with-ram-or-tag2text-for-automatic-labeling). 
-
-After installation, set the path to Grounded-SAM as an environment variable
-
-```bash
-export GSA_PATH=/path/to/Grounded-Segment-Anything
-```
-
-### (Optional) Set up the EfficientSAM variants
-
-Follow the installation instructions on this [page](https://github.com/IDEA-Research/Grounded-Segment-Anything/tree/main/EfficientSAM). The major steps are:
-
-* Install FastSAM codebase following [here](https://github.com/CASIA-IVA-Lab/FastSAM#installation). You don't have to create a new conda env. Just installing it in the same env as the Grounded-SAM is fine.
-* Download FastSAM checkpoints [FastSAM-x.pt](https://github.com/CASIA-IVA-Lab/FastSAM#model-checkpoints) and save it to `Grounded-Segment-Anything/EfficientSAM`. 
-* Download MobileSAM checkpoints [mobile_sam.pt](https://github.com/ChaoningZhang/MobileSAM/blob/master/weights/mobile_sam.pt) and save it to `Grounded-Segment-Anything/EfficientSAM`. 
-* Download Light HQ-SAM checkpoints [sam_hq_vit_tiny.pth](https://huggingface.co/lkeab/hq-sam/resolve/main/sam_hq_vit_tiny.pth) and save it to `Grounded-Segment-Anything/EfficientSAM`. 
-
-
-### Install this repo
-
-```bash
-git clone git@github.com:concept-graphs/concept-graphs.git
-cd concept-graphs
-pip install -e .
-```
-
-### Set up LLaVA (used for scene graph generation)
-
-Follow the instructions on the [LLaVA repo](https://github.com/haotian-liu/LLaVA) to set it up. You also need to prepare the LLaVA checkpoints and save them to `$LLAVA_MODEL_PATH`. We have tested with model checkpoint `LLaVA-7B-v0` and [LLaVA code](https://github.com/haotian-liu/LLaVA) at this [commit](https://github.com/haotian-liu/LLaVA/commit/8fc54a09a6be74b2abd913c468fb3d42ae826194). LLaVA codebase at later commits may require some adaptations.
-
-```bash
-# Set the env variables as follows (change the paths accordingly)
-export LLAVA_PYTHON_PATH=/path/to/llava
-export LLAVA_MODEL_PATH=/path/to/LLaVA-7B-v0
-```
-
-## Prepare dataset (Replica as an example)
-
-ConceptGraphs takes posed RGB-D images as input. Here we show how to prepare the dataset using [Replica](https://github.com/facebookresearch/Replica-Dataset) as an example. Instead of the original Replica dataset, download the scanned RGB-D trajectories of the Replica dataset provided by [Nice-SLAM](https://github.com/cvg/nice-slam). It contains rendered trajectories using the mesh models provided by the original Replica datasets. 
-
-Download the Replica RGB-D scan dataset using the downloading [script](https://github.com/cvg/nice-slam/blob/master/scripts/download_replica.sh) in [Nice-SLAM](https://github.com/cvg/nice-slam#replica-1) and set `$REPLICA_ROOT` to its saved path.
-
-```bash
-export REPLICA_ROOT=/path/to/Replica
-
-export CG_FOLDER=/path/to/concept-graphs/
-export REPLICA_CONFIG_PATH=${CG_FOLDER}/conceptgraph/dataset/dataconfigs/replica/replica.yaml
-```
-
-ConceptGraphs can also be easily run on other dataset. See `dataset/datasets_common.py` for how to write your own dataloader. 
-
-## Run ConceptGraph
-
-The following commands should be run in the `conceptgraph` folder.
-
-```bash
-cd conceptgraph
-```
-
-### (Optional) Run regular 3D reconstruction for sanity check
-
-The following command runs a 3D RGB reconstruction ([GradSLAM](https://github.com/gradslam/gradslam)) of a replica scene and also visualize it. This is useful for sanity check. 
-
-* `--visualize` requires it to be run with GUI.
-
-```bash
-SCENE_NAME=room0
-python scripts/run_slam_rgb.py \
-    --dataset_root $REPLICA_ROOT \
-    --dataset_config $REPLICA_CONFIG_PATH \
-    --scene_id $SCENE_NAME \
-    --image_height 480 \
-    --image_width 640 \
-    --stride 5 \
-    --visualize
-```
-
-### Extract 2D (Detection) Segmentation and per-resgion features
-
-First, (Detection) Segmentation results and per-region CLIP features are extracted. In the following, we provide two options. 
-* The first one (ConceptGraphs) uses SAM in the "segment all" mode and extract class-agnostic masks. 
-* The second one (ConceptGraphs-Detect) uses a tagging model and a detection model to extract class-aware bounding boxes first, and then use them as prompts for SAM to segment each object. 
-
-```bash
-SCENE_NAME=room0
-
-# The CoceptGraphs (without open-vocab detector)
-python scripts/generate_gsa_results.py \
-    --dataset_root $REPLICA_ROOT \
-    --dataset_config $REPLICA_CONFIG_PATH \
-    --scene_id $SCENE_NAME \
-    --class_set none \
-    --stride 5
-
-# The ConceptGraphs-Detect 
-CLASS_SET=ram
-python scripts/generate_gsa_results.py \
-    --dataset_root $REPLICA_ROOT \
-    --dataset_config $REPLICA_CONFIG_PATH \
-    --scene_id $SCENE_NAME \
-    --class_set $CLASS_SET \
-    --box_threshold 0.2 \
-    --text_threshold 0.2 \
-    --stride 5 \
-    --add_bg_classes \
-    --accumu_classes \
-    --exp_suffix withbg_allclasses
-```
-
-The above commands will save the detection and segmentation results in `$REPLICA_ROOT/$SCENE_NAME/`. 
-The visualization of the detection and segmentation can be viewed in `$REPLICA_ROOT/$SCENE_NAME/gsa_vis_none` and `$REPLICA_ROOT/$SCENE_NAME/gsa_vis_ram_withbg_allclasses` respectively. 
-
-You can ignore the `There's a wrong phrase happen, this is because of our post-process merged wrong tokens, which will be modified in the future. We will assign it with a random label at this time.` message for now. 
-
-### Run the 3D object mapping system
-
-The following command builds an object-based 3D map of the scene, using the image segmentation results from above.  
-
-* Use `save_objects_all_frames=True` to save the mapping results at every frame, which can be used for animated visualization by `scripts/animate_mapping_interactive.py` and `scripts/animate_mapping_save.py`. 
-* Use `merge_interval=20  merge_visual_sim_thresh=0.8  merge_text_sim_thresh=0.8` to also perform overlap-based merging during the mapping process. 
-
-```bash
-# Using the CoceptGraphs (without open-vocab detector)
-THRESHOLD=1.2
-python slam/cfslam_pipeline_batch.py \
-    dataset_root=$REPLICA_ROOT \
-    dataset_config=$REPLICA_CONFIG_PATH \
-    stride=5 \
-    scene_id=$SCENE_NAME \
-    spatial_sim_type=overlap \
-    mask_conf_threshold=0.95 \
-    match_method=sim_sum \
-    sim_threshold=${THRESHOLD} \
-    dbscan_eps=0.1 \
-    gsa_variant=none \
-    class_agnostic=True \
-    skip_bg=True \
-    max_bbox_area_ratio=0.5 \
-    save_suffix=overlap_maskconf0.95_simsum${THRESHOLD}_dbscan.1_merge20_masksub \
-    merge_interval=20 \
-    merge_visual_sim_thresh=0.8 \
-    merge_text_sim_thresh=0.8
-
-# On the ConceptGraphs-Detect 
-SCENE_NAMES=room0
-THRESHOLD=1.2
-python slam/cfslam_pipeline_batch.py \
-    dataset_root=$REPLICA_ROOT \
-    dataset_config=$REPLICA_CONFIG_PATH \
-    stride=5 \
-    scene_id=$SCENE_NAME \
-    spatial_sim_type=overlap \
-    mask_conf_threshold=0.25 \
-    match_method=sim_sum \
-    sim_threshold=${THRESHOLD} \
-    dbscan_eps=0.1 \
-    gsa_variant=ram_withbg_allclasses \
-    skip_bg=False \
-    max_bbox_area_ratio=0.5 \
-    save_suffix=overlap_maskconf0.25_simsum${THRESHOLD}_dbscan.1
-```
-
-The above commands will save the mapping results in `$REPLICA_ROOT/$SCENE_NAME/pcd_saves`. It will create two `pkl.gz` files, where the one with `_post` suffix indicates results after some post processing, which we recommend using.`
-
-If you run the above command with `save_objects_all_frames=True`, it will create a folder in `$REPLICA_ROOT/$SCENE_NAME/objects_all_frames`. Then you can run the following command to visualize the mapping process or save it to a video. Also see the relevant files for available key callbacks for viusalization options. 
-
-```
-python scripts/animate_mapping_interactive.py --input_folder $REPLICA_ROOT/$SCENE_NAME/objects_all_frames/<folder_name>
-python scripts/animate_mapping_save.py --input_folder $REPLICA_ROOT/$SCENE_NAME/objects_all_frames/<folder_name>
-```
-
-### Visualize the object-based mapping results
-
-```bash
-python scripts/visualize_cfslam_results.py --result_path /path/to/output.pkl.gz
-```
-
-Then in the open3d visualizer window, you can use the following key callbacks to change the visualization. 
-* Press `b` to toggle the background point clouds (wall, floor, ceiling, etc.). Only works on the ConceptGraphs-Detect.
-* Press `c` to color the point clouds by the object class from the tagging model. Only works on the ConceptGraphs-Detect.
-* Press `r` to color the point clouds by RGB. 
-* Press `f` and type text in the terminal, and the point cloud will be colored by the CLIP similarity with the input text. 
-* Press `i` to color the point clouds by object instance ID. 
-
-### Evaluate semantic segmentation from the object-based mapping results on Replica datasets
-
-First, download the GT point cloud with per-point semantic segmentation labels from this [Google Drive link](https://drive.google.com/file/d/1NhQIM5PCH5L5vkZDSRq6YF1bRaSX2aem/view?usp=sharing). Please refer to [this issue](https://github.com/concept-graphs/concept-graphs/issues/18#issuecomment-1876673985) for a brief description of how they are generated. Unzip the file and record its location in `REPLICA_SEMANTIC_ROOT`. 
-
-Then run the following command to evaluate the semantic segmentation results. The results will be saved in the `results` folder, where the mean recall `mrecall` is the mAcc and `fmiou` is the F-mIoU reported in the paper. 
-
-```bash
-# CoceptGraphs (without open-vocab detector)
-python scripts/eval_replica_semseg.py \
-    --replica_root $REPLICA_ROOT \
-    --replica_semantic_root $REPLICA_SEMANTIC_ROOT \
-    --n_exclude 6 \
-    --pred_exp_name none_overlap_maskconf0.95_simsum1.2_dbscan.1_merge20_masksub
-
-# On the ConceptGraphs-Detect (Grounding-DINO as the object detector)
-python scripts/eval_replica_semseg.py \
-    --replica_root $REPLICA_ROOT \
-    --replica_semantic_root $REPLICA_SEMANTIC_ROOT \
-    --n_exclude 6 \
-    --pred_exp_name ram_withbg_allclasses_overlap_maskconf0.25_simsum1.2_dbscan.1_masksub
-```
-
-
-
-### Extract object captions and build scene graphs
-
-Ensure that the `openai` package is installed and that your APIKEY is set. We recommend using GPT-4, since GPT-3.5 often produces inconsistent results on this task.
-```bash
-export OPENAI_API_KEY=<your GPT-4 API KEY here>
-```
-
-Also note that you may need to make the following change at [this line](https://github.com/haotian-liu/LLaVA/blob/main/llava/mm_utils.py#L68) in the original LLaVa repo to run the following commands. 
-
-```python
-            # if output_ids[0, -keyword_id.shape[0]:] == keyword_id:
-            #     return True
-            if torch.equal(output_ids[0, -keyword_id.shape[0]:], keyword_id):
-                return True
-```
-
-Then run the following commands sequentially to extract per-object captions and build the 3D scene graph. 
-
-```bash
-SCENE_NAME=room0
-PKL_FILENAME=output.pkl.gz  # Change this to the actual output file name of the pkl.gz file
-
-python scenegraph/build_scenegraph_cfslam.py \
-    --mode extract-node-captions \
-    --cachedir ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache \
-    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME} \
-    --class_names_file ${REPLICA_ROOT}/${SCENE_NAME}/gsa_classes_ram_withbg_allclasses.json
-
-python scenegraph/build_scenegraph_cfslam.py \
-    --mode refine-node-captions \
-    --cachedir ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache \
-    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME} \
-    --class_names_file ${REPLICA_ROOT}/${SCENE_NAME}/gsa_classes_ram_withbg_allclasses.json
-
-python scenegraph/build_scenegraph_cfslam.py \
-    --mode build-scenegraph \
-    --cachedir ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache \
-    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME} \
-    --class_names_file ${REPLICA_ROOT}/${SCENE_NAME}/gsa_classes_ram_withbg_allclasses.json
-```
-
-Then the object map with scene graph can be visualized using the following command. 
-* Press `g` to show the scene graph. 
-* Press "+" and "-" to increase and decrease the size of point cloud for better visualization.
-
-```bash
-python scripts/visualize_cfslam_results.py \
-    --result_path ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache/map/scene_map_cfslam_pruned.pkl.gz \
-    --edge_file ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache/cfslam_object_relations.json
-```
-
-
-## AI2Thor-related experiments
-
-During the development stage, we performed some experiments on the AI2Thor dataset. 
-Upon request, now we provide the code and instructions for these experiments. 
-However, note that we didn't perform any quantitative evaluation on AI2Thor. 
-And because of domain gap, performance of ConceptGraphs may be worse than other datasets reported. 
-
-### Setup 
-
-Use our own [fork](https://github.com/georgegu1997/ai2thor), where some changes were made to record the interaction trajectories. 
-
-```bash
-cd .. # go back to the root folder CFSLAM
-git clone git@github.com:georgegu1997/ai2thor.git
-cd ai2thor
-git checkout main5.0.0
-pip install -e .
-
-# This is for the ProcThor dataset.
-pip install ai2thor-colab prior --upgrade
-```
-
-If you meet error saying `Could not load the Qt platform plugin "xcb"` later on, it probably means that is some weird issue with `opencv-python` and `opencv-python-headless`. Try uninstalling them and install one of them back. 
-
-### Generating AI2Thor datasets
-
-1. Use `$AI2THOR_DATASET_ROOT` as the directory ai2thor dataset and save it to a variable. Also set the scene used from AI2Thor. 
-
-```bash
-# Change this to run it in a different scene in AI2Thor environment
-# train_3 is a scene from the ProcThor dataset, which containing multiple rooms in one house
-SCENE_NAME=train_3
-
-# The following scripts need to be run in the conceptgraph folder
-cd ./conceptgraph
-```
-
-2. Generate a densely captured grid map for the selected scene. 
-```bash
-# Uniform sample camera locations (XY + Yaw)
-python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --sample_method uniform --n_sample -1 --grid_size 0.5
-# Uniform sample + randomize lighting
-python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --sample_method uniform --n_sample -1 --grid_size 0.5 --save_suffix randlight --randomize_lighting
-```
-
-3. Generate a human-controlled trajectory for the selected scene. (GUI and keyboard interaction needed)
-```bash
-# Interact generation and save trajectory files. 
-# This line will open up a Unity window. You can control the agent with arrow keys in the terminal window. 
-python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --interact
-
-# Generate observations from the saved trajectory file
-python scripts/generate_ai2thor_dataset.py --dataset_root $AI2THOR_DATASET_ROOT --scene_name $SCENE_NAME --sample_method from_file
-```
-
-4. Generate a trajectory with object randomly moved. 
-```bash
-MOVE_RATIO=0.25
-RAND_SUFFIX=mv${MOVE_RATIO}
-python scripts/generate_ai2thor_dataset.py \
-    --dataset_root $AI2THOR_DATASET_ROOT \
-    --scene_name $SCENE_NAME \
-    --interact \
-    --save_suffix $RAND_SUFFIX \
-    --randomize_move_moveable_ratio $MOVE_RATIO \
-    --randomize_move_pickupable_ratio $MOVE_RATIO
-```
+That's all for now, we will keep updating this README with more information as we go.

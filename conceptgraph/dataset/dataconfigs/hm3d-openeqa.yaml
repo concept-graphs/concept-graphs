@@ -1,0 +1,9 @@
+dataset_name: 'hm3d-openeqa'
+camera_params:
+  image_height: 1080
+  image_width: 1920
+  fx: 0 # To be overwritten
+  fy: 0
+  cx: 0
+  cy: 0
+  png_depth_scale: 6553.5

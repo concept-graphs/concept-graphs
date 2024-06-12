@@ -2,8 +2,8 @@ dataset_name: 'scannet'
 camera_params:
   image_height: 968
   image_width: 1296
-  fx: 1169.621094
-  fy: 1167.105103
-  cx: 646.295044
-  cy: 489.927032
+  fx: 0.0  # To be loaded from the instrinsic files in ScanNet dataset
+  fy: 0.0
+  cx: 0.0
+  cy: 0.0
   png_depth_scale: 1000.0 #for depth image in png format

@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Literal, Union
 from textwrap import wrap
-from conceptgraph.utils.general_utils import prjson
+from PIL import Image
 
 import cv2
 import matplotlib.pyplot as plt
@@ -35,6 +35,8 @@ hf_logging.set_verbosity_error()
 import openai
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+from conceptgraph.utils.general_utils import prjson
 
 
 @dataclass
@@ -75,6 +77,9 @@ class ProgramArgs:
 
     # Masking option
     masking_option: Literal["blackout", "red_outline", "none"] = "none"
+    
+    # LLaVA-related arguments
+    llava_model_path: str = "liuhaotian/llava-v1.6-vicuna-7b"
 
 def load_scene_map(args, scene_map):
     """
@@ -147,7 +152,7 @@ def draw_red_outline(image, mask):
     return image_pil
 
 
-def crop_image_and_mask(image: Image, mask: np.ndarray, x1: int, y1: int, x2: int, y2: int, padding: int = 0):
+def crop_image_and_mask(image: Image, mask: np.ndarray, x1: int, y1: int, x2: int, y2: int, padding: int = 0) -> tuple[Image, np.ndarray]:
     """ Crop the image and mask with some padding. I made a single function that crops both the image and the mask at the same time because I was getting shape mismatches when I cropped them separately.This way I can check that they are the same shape."""
     
     image = np.array(image)
@@ -234,47 +239,25 @@ def plot_images_with_captions(images, captions, confidences, low_confidences, ma
 
 
 def extract_node_captions(args):
-    from conceptgraph.llava.llava_model import LLaVaChat
-
+    from conceptgraph.llava.llava_model_16 import LlavaModel16
+    
     # NOTE: args.mapfile is in cfslam format
     from conceptgraph.slam.slam_classes import MapObjectList
+
+    # rich console for pretty printing
+    console = rich.console.Console()
 
     # Load the scene map
     scene_map = MapObjectList()
     load_scene_map(args, scene_map)
     
-    # Scene map is in CFSLAM format
-    # keys: 'image_idx', 'mask_idx', 'color_path', 'class_id', 'num_detections',
-    # 'mask', 'xyxy', 'conf', 'n_points', 'pixel_area', 'contain_number', 'clip_ft',
-    # 'text_ft', 'pcd_np', 'bbox_np', 'pcd_color_np'
-
-    # Imports to help with feature extraction
-    # from extract_mask_level_features import (
-    #     crop_bbox_from_img,
-    #     get_model_and_preprocessor,
-    #     preprocess_and_encode_pil_image,
-    # )
-
-    # Load class names from the json file
-    class_names = None
-    with open(Path(args.class_names_file), "r") as f:
-        class_names = json.load(f)
-    print(class_names)
-
-    # Creating a namespace object to pass args to the LLaVA chat object
-    chat_args = SimpleNamespace()
-    chat_args.model_path = os.getenv("LLAVA_CKPT_PATH")
-    chat_args.conv_mode = "v0_mmtag" # "multimodal"
-    chat_args.num_gpus = 1
-
-    # rich console for pretty printing
-    console = rich.console.Console()
-
-    # Initialize LLaVA chat
-    chat = LLaVaChat(chat_args.model_path, chat_args.conv_mode, chat_args.num_gpus)
-    # chat = LLaVaChat(chat_args)
-    print("LLaVA chat initialized...")
-    query = "Describe the central object in the image."
+    chat = LlavaModel16(
+        model_path = args.llava_model_path,
+        model_base = None, 
+        conv_mode_input = None,
+    )
+    
+    query = "Describe the central object in the image. Give a name of the object and also mention its color, shape, material if possible. Return a concise answer. "
     # query = "Describe the object in the image that is outlined in red."
 
     # Directories to save features and captions
@@ -310,7 +293,6 @@ def extract_node_captions(args):
             image = Image.open(obj["color_path"][idx_det]).convert("RGB")
             xyxy = obj["xyxy"][idx_det]
             class_id = obj["class_id"][idx_det]
-            class_name = class_names[class_id]
             # Retrieve and crop mask
             mask = obj["mask"][idx_det]
 
@@ -334,20 +316,13 @@ def extract_node_captions(args):
             else:
                 low_confidences.append(False)
 
-            # image_tensor = chat.image_processor.preprocess(image_crop, return_tensors="pt")["pixel_values"][0]
-            image_tensor = chat.image_processor.preprocess(image_crop_modified, return_tensors="pt")["pixel_values"][0]
-
-            image_features = chat.encode_image(image_tensor[None, ...].half().cuda())
-            features.append(image_features.detach().cpu())
-
-            chat.reset()
             console.print("[bold red]User:[/bold red] " + query)
-            outputs = chat(query=query, image_features=image_features)
+            outputs = chat.infer(
+                query = query,
+                images = [image_crop_modified],
+            )
             console.print("[bold green]LLaVA:[/bold green] " + outputs)
             captions.append(outputs)
-        
-            # print(f"Line 274, obj['mask'][idx_det].shape: {obj['mask'][idx_det].shape}")
-            # print(f"Line 276, image.size: {image.size}")
             
             # For the LLava debug folder
             conf_value = conf[idx_det]
@@ -365,12 +340,12 @@ def extract_node_captions(args):
             }
         )
 
-        # Concatenate the features
-        if len(features) > 0:
-            features = torch.cat(features, dim=0)
+        # # Concatenate the features
+        # if len(features) > 0:
+        #     features = torch.cat(features, dim=0)
 
-        # Save the feature descriptors
-        torch.save(features, savedir_feat / f"{idx_obj}.pt")
+        # # Save the feature descriptors
+        # torch.save(features, savedir_feat / f"{idx_obj}.pt")
         
         # Again for the LLava debug folder
         if len(image_list) > 0:

@@ -25,6 +25,19 @@
 
 ![Splash Figure](./assets/splash-final.png)
 
+# This branch
+
+This branch implements the usage of [LLaVA 1.6](https://github.com/haotian-liu/LLaVA/tree/main) in the Scene Graph building stage. In the branch, by default, running `build_scenegraph_cfslam.py` with `--mode extract-node-captions` option will be using `liuhaotian/llava-v1.6-vicuna-7b`. This implementation is only for reference and has not been tested extensively. 
+
+For setup, instead of using the `conceptgraph` env from the main branch, I recommend creating a new conda env dedicated for the LLaVA codebase and running the above-mentioned command in that env (`llava` package requires installing many packages with specified versions, i.e. `==` signs in `pyproject.toml`. Be careful when you really want to merge envs). Please refer to [LLaVA 1.6](https://github.com/haotian-liu/LLaVA/tree/main) for setup. In addition, you may need the following install commands. 
+
+```bash
+pip install opencv-python
+pip install tyro
+pip install openai
+pip install open3d
+```
+
 # Updates
 
 * The codebase has been significantly refactored in the `ali-dev` [branch](https://github.com/concept-graphs/concept-graphs/tree/ali-dev), which provides a real-time, streamlined re-implementation that supports RGB-D video from iPhone and has a better visualization using [Rerun.io](https://rerun.io/). We also provide this [getting started video tutorial](https://youtu.be/56jEFyrqqpo?si=jo-qto5Gv8qxqEw2). Please check it out!

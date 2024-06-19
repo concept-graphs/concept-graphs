@@ -20,7 +20,6 @@ import pickle
 import gzip
 import open_clip
 
-from ultralytics import YOLO
 import torch
 import torchvision
 from torch.utils.data import Dataset
@@ -102,8 +101,8 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument("--end", type=int, default=-1)
     parser.add_argument("--stride", type=int, default=1)
 
-    parser.add_argument("--desired-height", type=int, default=480)
-    parser.add_argument("--desired-width", type=int, default=640)
+    parser.add_argument("--desired_height", type=int, default=480)
+    parser.add_argument("--desired_width", type=int, default=640)
 
     parser.add_argument("--box_threshold", type=float, default=0.25)
     parser.add_argument("--text_threshold", type=float, default=0.25)
@@ -341,7 +340,9 @@ def main(args: argparse.Namespace):
     global_classes = set()
     
     # Initialize a YOLO-World model
-    yolo_model_w_classes = YOLO('yolov8l-world.pt')  # or choose yolov8m/l-world.pt
+    if args.detector == "yolo":
+        from ultralytics import YOLO
+        yolo_model_w_classes = YOLO('yolov8l-world.pt')  # or choose yolov8m/l-world.pt
     
     if args.class_set == "scene":
         # Load the object meta information
@@ -421,8 +422,8 @@ def main(args: argparse.Namespace):
 
         color_path = Path(color_path)
         
-        vis_save_path = color_path.parent.parent / f"gsa_vis_{save_name}" / color_path.name
-        detections_save_path = color_path.parent.parent / f"gsa_detections_{save_name}" / color_path.name
+        vis_save_path = args.dataset_root / args.scene_id / f"gsa_vis_{save_name}" / color_path.name
+        detections_save_path = args.dataset_root / args.scene_id / f"gsa_detections_{save_name}" / color_path.name
         detections_save_path = detections_save_path.with_suffix(".pkl.gz")
         
         os.makedirs(os.path.dirname(vis_save_path), exist_ok=True)
@@ -461,7 +462,7 @@ def main(args: argparse.Namespace):
                 "room", "kitchen", "office", "house", "home", "building", "corner",
                 "shadow", "carpet", "photo", "shade", "stall", "space", "aquarium", 
                 "apartment", "image", "city", "blue", "skylight", "hallway", 
-                "bureau", "modern", "salon", "doorway", "wall lamp"
+                "bureau", "modern", "salon", "doorway", "wall lamp", "wood floor"
             ]
             bg_classes = ["wall", "floor", "ceiling"]
 

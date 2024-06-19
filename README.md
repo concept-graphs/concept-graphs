@@ -331,20 +331,17 @@ PKL_FILENAME=output.pkl.gz  # Change this to the actual output file name of the 
 python scenegraph/build_scenegraph_cfslam.py \
     --mode extract-node-captions \
     --cachedir ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache \
-    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME} \
-    --class_names_file ${REPLICA_ROOT}/${SCENE_NAME}/gsa_classes_ram_withbg_allclasses.json
+    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME}
 
 python scenegraph/build_scenegraph_cfslam.py \
     --mode refine-node-captions \
     --cachedir ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache \
-    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME} \
-    --class_names_file ${REPLICA_ROOT}/${SCENE_NAME}/gsa_classes_ram_withbg_allclasses.json
+    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME}
 
 python scenegraph/build_scenegraph_cfslam.py \
     --mode build-scenegraph \
     --cachedir ${REPLICA_ROOT}/${SCENE_NAME}/sg_cache \
-    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME} \
-    --class_names_file ${REPLICA_ROOT}/${SCENE_NAME}/gsa_classes_ram_withbg_allclasses.json
+    --mapfile ${REPLICA_ROOT}/${SCENE_NAME}/pcd_saves/${PKL_FILENAME}
 ```
 
 Then the object map with scene graph can be visualized using the following command. 

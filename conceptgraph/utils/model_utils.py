@@ -1,6 +1,5 @@
 import os
 from conceptgraph.utils.general_utils import measure_time
-from line_profiler import profile
 from segment_anything import sam_model_registry, SamPredictor, SamAutomaticMaskGenerator
 import numpy as np
 import torch
@@ -129,7 +128,6 @@ def compute_clip_features(image, detections, clip_model, clip_preprocess, clip_t
 
     return image_crops, image_feats, text_feats
 
-@profile
 def compute_clip_features_batched(image, detections, clip_model, clip_preprocess, clip_tokenizer, classes, device):
     
     image = Image.fromarray(image)

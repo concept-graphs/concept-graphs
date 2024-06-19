@@ -187,7 +187,7 @@ def main(cfg : DictConfig):
         gobs = None # stands for grounded SAM observations
 
         color_path = Path(color_path)
-        detections_path = color_path.parent.parent / cfg.detection_folder_name / color_path.name
+        detections_path = cfg.dataset_root / cfg.scene_id / cfg.detection_folder_name / color_path.name
         detections_path = detections_path.with_suffix(".pkl.gz")
         color_path = str(color_path)
         detections_path = str(detections_path)

@@ -302,6 +302,10 @@ def merge_obj2_into_obj1(obj1, obj2, downsample_voxel_size, dbscan_remove_noise,
     if unhandled_keys:
         raise ValueError(f"Unhandled keys detected in obj2: {unhandled_keys}. Please update the merge function to handle these attributes.")
 
+    # Custom handling for 'pcd', 'bbox', 'clip_ft', and 'text_ft'
+    n_obj1_det = obj1['num_detections']
+    n_obj2_det = obj2['num_detections']
+    
     # Process extend and add attributes
     for attr in extend_attributes:
         if attr in obj1 and attr in obj2:
@@ -311,13 +315,9 @@ def merge_obj2_into_obj1(obj1, obj2, downsample_voxel_size, dbscan_remove_noise,
         if attr in obj1 and attr in obj2:
             obj1[attr] += obj2[attr]
 
-    # Custom handling for 'pcd', 'bbox', 'clip_ft', and 'text_ft'
-    n_obj1_det = obj1['num_detections']
-    n_obj2_det = obj2['num_detections']
-    
-        # Handling 'caption'
+    # Handling 'caption'
     if 'caption' in obj1 and 'caption' in obj2:
-        n_obj1_det = obj1['num_detections']
+        # n_obj1_det = obj1['num_detections']
         for key, value in obj2['caption'].items():
             obj1['caption'][key + n_obj1_det] = value
 

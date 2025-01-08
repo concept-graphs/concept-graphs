@@ -10,7 +10,7 @@ from conceptgraph.slam.slam_classes import MapObjectList
 from conceptgraph.slam.utils import prepare_objects_save_vis
 from conceptgraph.utils.ious import mask_subtract_contained
 import supervision as sv
-import scipy.ndimage as ndi 
+import scipy.ndimage as ndi
 from conceptgraph.utils.vlm import get_obj_captions_from_image_gpt4v, get_obj_rel_from_image_gpt4v, vlm_extract_object_captions
 import cv2
 import re
@@ -48,7 +48,7 @@ def prjson(input_json, indent=0):
     """ Pretty print a json object """
     if not isinstance(input_json, list):
         input_json = [input_json]
-        
+
     print("[")
     for i, entry in enumerate(input_json):
         print("  {")
@@ -66,7 +66,7 @@ def cfg_to_dict(input_cfg):
     """ Convert a Hydra configuration object to a native Python dictionary,
     ensuring all special types (e.g., ListConfig, DictConfig, PosixPath) are
     converted to serializable types for JSON. Checks for non-serializable objects. """
-    
+
     def convert_to_serializable(obj):
         """ Recursively convert non-serializable objects to serializable types. """
         if isinstance(obj, dict):
@@ -109,12 +109,12 @@ def get_stream_data_out_path(dataset_root, scene_id, make_dir=True):
     stream_rgb_path = stream_data_out_path / "rgb"
     stream_depth_path = stream_data_out_path / "depth"
     stream_poses_path = stream_data_out_path / "poses"
-    
+
     if make_dir:
         stream_rgb_path.mkdir(parents=True, exist_ok=True)
         stream_depth_path.mkdir(parents=True, exist_ok=True)
         stream_poses_path.mkdir(parents=True, exist_ok=True)
-        
+
     return stream_rgb_path, stream_depth_path, stream_poses_path
 
 def get_exp_out_path(dataset_root, scene_id, exp_suffix, make_dir=True):
@@ -150,38 +150,38 @@ def mask_iou(mask1, mask2):
     return intersection / union
 
 def annotate_for_vlm(
-    image: np.ndarray, 
+    image: np.ndarray,
     detections: sv.Detections,
-    obj_classes, 
-    labels: list[str], 
-    save_path=None, 
-    color: tuple=(0, 255, 0), 
-    thickness: int=2, 
-    text_color: tuple=(255, 255, 255), 
-    text_scale: float=0.6, 
-    text_thickness: int=2, 
-    text_bg_color: tuple=(255, 255, 255), 
+    obj_classes,
+    labels: list[str],
+    save_path=None,
+    color: tuple=(0, 255, 0),
+    thickness: int=2,
+    text_color: tuple=(255, 255, 255),
+    text_scale: float=0.6,
+    text_thickness: int=2,
+    text_bg_color: tuple=(255, 255, 255),
     text_bg_opacity: float=0.95,  # Opacity from 0 (transparent) to 1 (opaque)
     small_mask_threshold = 0.002,
     mask_opacity: float = 0.2  # Opacity for mask fill
 ) -> np.ndarray:
     annotated_image = image.copy()
-    
-    
+
+
     # if image.shape[0] > 700:
     #     print(f"Line 604, image.shape[0]: {image.shape[0]}")
     #     text_scale = 2.5
     #     text_thickness = 5
     total_pixels = image.shape[0] * image.shape[1]
     small_mask_size = total_pixels * small_mask_threshold
-    
+
     detections_mask = detections.mask
     detections_mask = mask_subtract_contained(detections.xyxy, detections_mask)
-    
+
     # Sort detections by mask area, large to small, and keep track of original indices
     mask_areas = [np.count_nonzero(mask) for mask in detections_mask]
     sorted_indices = sorted(range(len(mask_areas)), key=lambda x: mask_areas[x], reverse=True)
-    
+
     # Iterate over each mask and corresponding label in the detections in sorted order
     for i in sorted_indices:
         mask = detections_mask[i]
@@ -189,12 +189,12 @@ def annotate_for_vlm(
         label_num = label.split(" ")[-1]
         label_name = re.sub(r'\s*\d+$', '', label).strip()
         bbox = detections.xyxy[i]
-        
+
         obj_color = obj_classes.get_class_color(int(detections.class_id[i]))
         # multiply by 255 to convert to BGR
         obj_color = tuple([int(c * 255) for c in obj_color])
-        
-        # Add color over mask for this object 
+
+        # Add color over mask for this object
         mask_uint8 = mask.astype(np.uint8)
         mask_color_image = np.zeros_like(annotated_image)
         mask_color_image[mask_uint8 > 0] = obj_color
@@ -215,17 +215,17 @@ def annotate_for_vlm(
             x_center, y_center = int(x_center), int(y_center)
 
         # Prepare text background
-        text = label_num + ": " + label_name 
+        text = label_num + ": " + label_name
         (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, text_scale, text_thickness)
         text_x_left = x_center - text_width // 2
         text_y_top = y_center + (text_height) // 2
-        
+
         # Create a rectangle sub-image for the text background
         b_pad = 2 # background rectangle padding
         rect_top_left = (text_x_left - b_pad, text_y_top - text_height - baseline - b_pad)
         rect_bottom_right = (text_x_left + text_width + b_pad, text_y_top - baseline//2 + b_pad)
         sub_img = annotated_image[rect_top_left[1]:rect_bottom_right[1], rect_top_left[0]:rect_bottom_right[0]]
-        
+
         # Create the background rectangle with the specified color and opacity
         # make the text bg color be the negative of the text color
         text_bg_color = tuple([255 - c for c in obj_color])
@@ -236,31 +236,31 @@ def annotate_for_vlm(
 
         # Draw text with background
         cv2.putText(
-            annotated_image, 
-            text, 
-            (text_x_left, text_y_top - baseline), 
-            cv2.FONT_HERSHEY_SIMPLEX, 
-            text_scale, 
+            annotated_image,
+            text,
+            (text_x_left, text_y_top - baseline),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            text_scale,
             # obj_color,
             # (255,255,255),
             (0,0,0),
-            text_thickness, 
+            text_thickness,
             cv2.LINE_AA
         )
-        
+
         # Draw text with background
         cv2.putText(
-            annotated_image, 
-            text, 
-            (text_x_left, text_y_top - baseline), 
-            cv2.FONT_HERSHEY_SIMPLEX, 
+            annotated_image,
+            text,
+            (text_x_left, text_y_top - baseline),
+            cv2.FONT_HERSHEY_SIMPLEX,
             text_scale,
-            # (0,0,0), 
+            # (0,0,0),
             obj_color,
-            text_thickness - 1, 
+            text_thickness - 1,
             cv2.LINE_AA
         )
-        
+
         if save_path:
             cv2.imwrite(save_path, annotated_image)
 
@@ -268,7 +268,7 @@ def annotate_for_vlm(
 
 def plot_edges_from_vlm(image: np.ndarray, edges, detections: sv.Detections, obj_classes, labels: list[str], sorted_indices: list[int], save_path=None) -> np.ndarray:
     annotated_image = image.copy()
-    
+
     # Create a map from label to mask centroid and color for quick lookup
     label_to_centroid_color = {}
     for idx in sorted_indices:
@@ -276,7 +276,7 @@ def plot_edges_from_vlm(image: np.ndarray, edges, detections: sv.Detections, obj
         label_num = labels[idx].split(' ')[-1]  # Assuming label format is 'object X'
         obj_color = obj_classes.get_class_color(int(detections.class_id[idx]))
         obj_color = tuple([int(c * 255) for c in obj_color])  # Convert to BGR
-    
+
         # Determine the centroid of the mask
         ys, xs = np.nonzero(mask)
         if ys.size > 0 and xs.size > 0:
@@ -286,9 +286,9 @@ def plot_edges_from_vlm(image: np.ndarray, edges, detections: sv.Detections, obj
             # Fallback to bbox center if mask is empty
             bbox = detections.xyxy[idx]
             centroid = (int((bbox[0] + bbox[2]) / 2), int((bbox[1] + bbox[3]) / 2))
-        
+
         label_to_centroid_color[label_num] = (centroid, obj_color)
-    
+
     # Draw edges based on relationships specified
     for edge in edges:
         src_label, _, dst_label = edge
@@ -299,17 +299,17 @@ def plot_edges_from_vlm(image: np.ndarray, edges, detections: sv.Detections, obj
             dst_centroid, dst_color = label_to_centroid_color[dst_label]
             # Draw line from source to destination object with the color of the destination object
             cv2.line(annotated_image, src_centroid, dst_centroid, dst_color, 2)
-    
+
     if save_path:
             cv2.imwrite(str(save_path), annotated_image)
-            
+
     return annotated_image
 
 def filter_detections(
     image,
-    detections: sv.Detections, 
-    classes, 
-    top_x_detections = None, 
+    detections: sv.Detections,
+    classes,
+    top_x_detections = None,
     confidence_threshold: float = 0.0,
     given_labels = None,
     iou_threshold: float = 0.80,  # IoU similarity threshold
@@ -345,7 +345,7 @@ def filter_detections(
         curr_center = ((curr_xyxy[0] + curr_xyxy[2]) / 2, (curr_xyxy[1] + curr_xyxy[3]) / 2)
         curr_area = (curr_xyxy[2] - curr_xyxy[0]) * (curr_xyxy[3] - curr_xyxy[1])
         keep = True
-        
+
             # Calculate the total number of pixels as a threshold for small masks
         total_pixels = image.shape[0] * image.shape[1]
         small_mask_size = total_pixels * min_mask_size_ratio
@@ -358,13 +358,13 @@ def filter_detections(
 
         for other in filtered_detections:
             _, other_class_id, other_xyxy, other_mask, _ = other
-            
+
             if mask_iou(curr_mask, other_mask) > iou_threshold:
                 keep = False
                 print(f"Removing {classes.get_classes_arr()[curr_class_id]} because it has an IoU of {mask_iou(curr_mask, other_mask)} with object {classes.get_classes_arr()[other_class_id]}.")
                 break
-            
-            
+
+
             other_center = ((other_xyxy[0] + other_xyxy[2]) / 2, (other_xyxy[1] + other_xyxy[3]) / 2)
             other_area = (other_xyxy[2] - other_xyxy[0]) * (other_xyxy[3] - other_xyxy[1])
 
@@ -435,13 +435,14 @@ def make_vlm_edges_and_captions(image, curr_det, obj_classes, detection_class_la
     # Filter the detections
     filtered_detections, labels = filter_detections(
         image=image,
-        detections=curr_det, 
+        detections=curr_det,
         classes=obj_classes,
         top_x_detections=150000,
         confidence_threshold=0.00001,
         given_labels=detection_class_labels,
-    )
-    
+    )`
+
+    captions = []
     edges = []
     edge_image = None
     if make_edges_flag:
@@ -458,13 +459,13 @@ def make_vlm_edges_and_captions(image, curr_det, obj_classes, detection_class_la
 
         cv2.imwrite(str(vis_save_path_for_vlm), annotated_image_for_vlm)
         print(f"Line 313, vis_save_path_for_vlm: {vis_save_path_for_vlm}")
-        
+
         edges = get_obj_rel_from_image_gpt4v(openai_client, vis_save_path_for_vlm, label_list)
         captions = get_obj_captions_from_image_gpt4v(openai_client, vis_save_path_for_vlm, label_list)
         edge_image = plot_edges_from_vlm(annotated_image_for_vlm, edges, filtered_detections, obj_classes, labels, sorted_indices, save_path=vis_save_path_for_vlm_edges)
-    
+
     return labels, edges, edge_image, captions
-    
+
 def handle_rerun_saving(use_rerun, save_rerun, exp_suffix, exp_out_path):
     # Save the rerun output if needed
     if use_rerun and save_rerun:
@@ -522,7 +523,7 @@ def should_exit_early(file_path):
     try:
         with open(file_path, 'r') as file:
             data = json.load(file)
-        
+
         # Check if we should exit early
         if data.get("exit_early", False):
             # Reset the exit_early flag to False
@@ -534,7 +535,7 @@ def should_exit_early(file_path):
         else:
             return False
     except Exception as e:
-        # If there's an error reading the file or the key doesn't exist, 
+        # If there's an error reading the file or the key doesn't exist,
         # log the error and return False
         print(f"Error reading {file_path}: {e}")
         logging.info(f"Error reading {file_path}: {e}")
@@ -551,15 +552,15 @@ def save_detection_results(base_path, results):
             # For other types, fall back to pickle
             with gzip.open(f"{save_path}.pkl.gz", "wb") as f:
                 pickle.dump(value, f)
-                
+
 def load_saved_detections(base_path):
     base_path = Path(base_path)
-    
+
     # Construct potential .pkl.gz file path based on the base_path
     potential_pkl_gz_path = Path(str(base_path) + '.pkl.gz')
 
     # Check if the constructed .pkl.gz file exists
-    # This is the old wat 
+    # This is the old wat
     if potential_pkl_gz_path.exists() and potential_pkl_gz_path.is_file():
         # The path points directly to a .pkl.gz file
         with gzip.open(potential_pkl_gz_path, "rb") as f:
@@ -579,8 +580,8 @@ def load_saved_detections(base_path):
         return loaded_detections
     else:
         raise FileNotFoundError(f"No valid file or directory found at {base_path}")
-        
-        
+
+
 class ObjectClasses:
     """
     Manages object classes and their associated colors, allowing for exclusion of background classes.
@@ -606,7 +607,7 @@ class ObjectClasses:
     def _load_or_create_colors(self):
         with open(self.classes_file_path, "r") as f:
             all_classes = [cls.strip() for cls in f.readlines()]
-        
+
         # Filter classes based on the skip_bg parameter
         if self.skip_bg:
             classes = [cls for cls in all_classes if cls not in self.bg_classes]
@@ -631,7 +632,7 @@ class ObjectClasses:
         Returns the list of class names, excluding background classes if configured to do so.
         """
         return self.classes
-    
+
     def get_bg_classes_arr(self):
         """
         Returns the list of background class names, if configured to do so.
@@ -641,10 +642,10 @@ class ObjectClasses:
     def get_class_color(self, key):
         """
         Retrieves the color associated with a given class name or index.
-        
+
         Args:
             key (int or str): The index or name of the class.
-        
+
         Returns:
             list: The color (RGB values) associated with the class.
         """
@@ -665,7 +666,7 @@ class ObjectClasses:
         Returns a dictionary of class colors, just like self.class_to_color, but indexed by class index.
         """
         return {str(i): self.get_class_color(i) for i in range(len(self.classes))}
-    
+
 def save_obj_json(exp_suffix, exp_out_path, objects):
     """
     Saves the objects to a JSON file with the specified suffix.
@@ -681,7 +682,7 @@ def save_obj_json(exp_suffix, exp_out_path, objects):
         bbox_extent = [round(val, 2) for val in curr_obj['bbox'].extent]  # Round values to 2 decimal places
         bbox_center = [round(val, 2) for val in curr_obj['bbox'].center]  # Assuming `center` is an iterable like a list or tuple
         bbox_volume = round(bbox_extent[0] * bbox_extent[1] * bbox_extent[2], 2)  # Calculate volume and round to 2 decimal places
-        
+
         obj_dict = {
             "id": curr_obj['curr_obj_num'],
             "object_tag": curr_obj['class_name'],
@@ -691,13 +692,13 @@ def save_obj_json(exp_suffix, exp_out_path, objects):
             "bbox_volume": bbox_volume  # Add the volume to the dictionary
         }
         json_obj_list[obj_key] = obj_dict
-        
+
     json_obj_out_path = Path(exp_out_path) / f"obj_json_{exp_suffix}.json"
     json_obj_out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(json_obj_out_path, "w") as f:
         json.dump(json_obj_list, f, indent=2)
     print(f"Saved object JSON to {json_obj_out_path}")
-    
+
 
 def save_edge_json(exp_suffix, exp_out_path, objects, edges):
     """
@@ -716,12 +717,12 @@ def save_edge_json(exp_suffix, exp_out_path, objects, edges):
         obj2_idx = curr_edge.obj2_idx
         rel_type = curr_edge.rel_type
         num_det = curr_edge.num_detections
-        obj1_class_name = objects[obj1_idx]['class_name'] 
+        obj1_class_name = objects[obj1_idx]['class_name']
         obj2_class_name = objects[obj2_idx]['class_name']
         obj1_curr_obj_num = objects[obj1_idx]['curr_obj_num']
         obj2_curr_obj_num = objects[obj2_idx]['curr_obj_num']
         # print(f"Line 732, {obj1_class_name} {rel_type} {obj2_class_name}, num_det: {num_det}")
-        
+
         edj_dict = {
             "edge_id": curr_idx,
             "edge_description": f"{obj1_class_name} {rel_type} {obj2_class_name}",
@@ -733,7 +734,7 @@ def save_edge_json(exp_suffix, exp_out_path, objects, edges):
             "relationship": rel_type,
         }
         json_edge_list[f"edge_{curr_idx}"] = edj_dict
-        
+
     json_edge_out_path = Path(exp_out_path) / f"edge_json_{exp_suffix}.json"
     json_edge_out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(json_edge_out_path, "w") as f:
@@ -785,7 +786,7 @@ def save_pointcloud(exp_suffix, exp_out_path, cfg, objects, obj_classes, latest_
         latest_pcd_path.symlink_to(pcd_save_path)
         print(f"Updated symlink to point to the latest point cloud save at {latest_pcd_path} to:\n{pcd_save_path}")
 
-        
+
 def find_existing_image_path(base_path, extensions):
     """
     Checks for the existence of a file with the given base path and any of the provided extensions.
@@ -809,7 +810,7 @@ def save_objects_for_frame(obj_all_frames_out_path, frame_idx, objects, obj_min_
     filtered_objects = [obj for obj in objects if obj['num_detections'] >= obj_min_detections]
     prepared_objects = prepare_objects_save_vis(MapObjectList(filtered_objects))
     result = {
-        "camera_pose": adjusted_pose, 
+        "camera_pose": adjusted_pose,
         "objects": prepared_objects,
         "frame_idx": frame_idx,
         "num_objects": len(filtered_objects),
@@ -817,7 +818,7 @@ def save_objects_for_frame(obj_all_frames_out_path, frame_idx, objects, obj_min_
     }
     with gzip.open(save_path, 'wb') as f:
         pickle.dump(result, f)
-        
+
 def add_info_to_image(image, frame_idx, num_objects, color_path):
     frame_info_text = f"Frame: {frame_idx}, Objects: {num_objects}, Path: {str(color_path)}"
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -827,15 +828,15 @@ def add_info_to_image(image, frame_idx, num_objects, color_path):
     line_type = cv2.LINE_AA
     position = (10, image.shape[0] - 10)
     cv2.putText(image, frame_info_text, position, font, font_scale, color, thickness, line_type)
-        
+
 def save_video_from_frames(frames, exp_out_path, exp_suffix):
     video_save_path = exp_out_path / (f"s_mapping_{exp_suffix}.mp4")
     save_video_from_frames(frames, video_save_path, fps=10)
     print(f"Save video to {video_save_path}")
-        
+
 def vis_render_image(objects, obj_classes, obj_renderer, image_original_pil, adjusted_pose, frames, frame_idx, color_path, obj_min_detections, class_agnostic, debug_render, is_final_frame, exp_out_path, exp_suffix):
     filtered_objects = [
-        deepcopy(obj) for obj in objects 
+        deepcopy(obj) for obj in objects
         if obj['num_detections'] >= obj_min_detections and not obj['is_background']
     ]
     objects_vis = MapObjectList(filtered_objects)
@@ -852,7 +853,7 @@ def vis_render_image(objects, obj_classes, obj_renderer, image_original_pil, adj
         paint_new_objects=False,
         return_vis_handle=debug_render,
     )
-    
+
     if rendered_image is not None:
         add_info_to_image(rendered_image, frame_idx, len(filtered_objects), color_path)
         frames.append((rendered_image * 255).astype(np.uint8))

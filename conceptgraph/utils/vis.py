@@ -27,7 +27,7 @@ class OnlineObjectRenderer():
     Refactor of the open3d visualization code to make it more modular
     '''
     def __init__(
-        self, 
+        self,
         view_param: str | dict,
         base_objects: MapObjectList | None = None,
         gray_map: bool = False
@@ -44,40 +44,40 @@ class OnlineObjectRenderer():
                     base_pcds_vis[i].paint_uniform_color([0.5, 0.5, 0.5])
             for i in range(self.n_base_objects):
                 base_bboxes_vis[i].color = [0.5, 0.5, 0.5]
-            
+
             self.base_pcds_vis = base_pcds_vis
             self.base_bboxes_vis = base_bboxes_vis
         else:
             self.n_base_objects = 0
-        
+
         self.est_traj = []
         self.gt_traj = []
-        
+
         self.cmap = matplotlib.colormaps.get_cmap("turbo")
 
         if isinstance(view_param, str):
             self.view_param = o3d.io.read_pinhole_camera_parameters(view_param)
         else:
             self.view_param = view_param
-            
+
         self.window_height = self.view_param.intrinsic.height
         self.window_width = self.view_param.intrinsic.width
-        
+
         self.vis = o3d.visualization.Visualizer()
         self.vis.create_window(
             width = self.window_width,
             height = self.window_height,
         )
-        
+
         self.vis_ctrl = self.vis.get_view_control()
         self.vis_ctrl.convert_from_pinhole_camera_parameters(self.view_param)
-        
+
     def filter_base_by_mask(self, mask: Iterable[bool]):
         assert len(mask) == self.n_base_objects
         self.base_pcds_vis = [pcd for pcd, m in zip(self.base_pcds_vis, mask) if m]
         self.base_bboxes_vis = [bbox for bbox, m in zip(self.base_bboxes_vis, mask) if m]
         self.n_base_objects = len(self.base_pcds_vis)
-    
+
     def step(
         self,
         image: Image.Image,
@@ -92,7 +92,7 @@ class OnlineObjectRenderer():
     ):
         # Remove all the geometries
         self.vis.clear_geometries()
-        
+
         # Add the pose cameras and trajectories
         if est_pose is not None:
             self.est_traj.append(est_pose)
@@ -103,7 +103,7 @@ class OnlineObjectRenderer():
             if len(self.est_traj) > 1:
                 est_traj_lineset = poses2lineset(np.stack(self.est_traj), color=[1., 0, 0])
                 self.vis.add_geometry(est_traj_lineset)
-            
+
         if gt_pose is not None:
             self.gt_traj.append(gt_pose)
             gt_camera_frustum = better_camera_frustum(
@@ -113,7 +113,7 @@ class OnlineObjectRenderer():
             if len(self.gt_traj) > 1:
                 gt_traj_lineset = poses2lineset(np.stack(self.gt_traj), color=[0, 1., 0])
                 self.vis.add_geometry(gt_traj_lineset)
-    
+
         # Add the base objects
         if self.n_base_objects > 0:
             if base_objects_color is not None:
@@ -121,10 +121,10 @@ class OnlineObjectRenderer():
                     color = base_objects_color[obj_id]
                     self.base_pcds_vis[obj_id].paint_uniform_color(color)
                     self.base_bboxes_vis[obj_id].color = color
-            
+
             for geom in self.base_pcds_vis + self.base_bboxes_vis:
                 self.vis.add_geometry(geom)
-            
+
         # Show the extra pcds to visualize
         if pcds is not None:
             for i in range(len(pcds)):
@@ -132,7 +132,7 @@ class OnlineObjectRenderer():
                 if pcd_colors is not None:
                     pcds[i].paint_uniform_color(pcd_colors[i][:3])
                 self.vis.add_geometry(pcds[i])
-            
+
         # Show the extra new objects
         if new_objects is not None:
             for obj in new_objects:
@@ -142,18 +142,18 @@ class OnlineObjectRenderer():
                 if paint_new_objects:
                     pcd.paint_uniform_color([0.0, 1.0, 0.0])
                     bbox.color = [0.0, 1.0, 0.0]
-                
+
                 self.vis.add_geometry(pcd)
                 self.vis.add_geometry(bbox)
-        
+
         self.vis_ctrl.convert_from_pinhole_camera_parameters(self.view_param)
-        
+
         self.vis.poll_events()
         self.vis.update_renderer()
-        
+
         rendered_image = self.vis.capture_screen_float_buffer(False)
         rendered_image = np.asarray(rendered_image)
-        
+
         if return_vis_handle:
             return rendered_image, self.vis
         else:
@@ -162,10 +162,10 @@ class OnlineObjectRenderer():
 def get_random_colors(num_colors):
     '''
     Generate random colors for visualization
-    
+
     Args:
         num_colors (int): number of colors to generate
-        
+
     Returns:
         colors (np.ndarray): (num_colors, 3) array of colors, in RGB, [0, 1]
     '''
@@ -183,35 +183,35 @@ def show_mask(mask, ax, random_color=False):
     h, w = mask.shape[-2:]
     mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
     ax.imshow(mask_image)
-    
+
 def show_points(coords, labels, ax, marker_size=375):
     pos_points = coords[labels==1]
     neg_points = coords[labels==0]
     ax.scatter(pos_points[:, 0], pos_points[:, 1], color='green', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
-    ax.scatter(neg_points[:, 0], neg_points[:, 1], color='red', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)   
-    
+    ax.scatter(neg_points[:, 0], neg_points[:, 1], color='red', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
+
 def show_box(box, ax, label=None):
     x0, y0 = box[0], box[1]
     w, h = box[2] - box[0], box[3] - box[1]
-    ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0,0,0,0), lw=2))    
-    
+    ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+
     if label is not None:
         ax.text(x0, y0, label)
-        
+
 def vis_result_fast_on_depth(
-    depth_image: np.ndarray, 
-    detections: sv.Detections, 
-    classes: list[str], 
-    color: Color | ColorPalette = ColorPalette.default(), 
+    depth_image: np.ndarray,
+    detections: sv.Detections,
+    classes: list[str],
+    color: Color | ColorPalette = ColorPalette.DEFAULT,
     instance_random_color: bool = False,
     draw_bbox: bool = True,
 ) -> np.ndarray:
     '''
-    Annotate the image with the detection results. 
-    This is fast but of the same resolution of the input image, thus can be blurry. 
+    Annotate the image with the detection results.
+    This is fast but of the same resolution of the input image, thus can be blurry.
     '''
     # annotate image with detections
-    box_annotator = sv.BoxAnnotator(
+    box_annotator = sv.LabelAnnotator(
         color = color,
         text_scale=0.3,
         text_thickness=1,
@@ -235,24 +235,24 @@ def vis_result_fast_on_depth(
     else:
         print("Detections object does not have 'confidence' or 'class_id' attributes or one of them is missing.")
 
-    
+
     if instance_random_color:
         # generate random colors for each segmentation
         # First create a shallow copy of the input detections
         detections = dataclasses.replace(detections)
         detections.class_id = np.arange(len(detections))
-        
+
     annotated_image = mask_annotator.annotate(scene=depth_image.copy(), detections=detections)
-    
+
     if draw_bbox:
         annotated_image = box_annotator.annotate(scene=annotated_image, detections=detections, labels=labels)
     return annotated_image, labels
 
 
 def old_filter_detections(
-    detections: sv.Detections, 
-    classes: list[str], 
-    top_x_detections: Optional[int] = None, 
+    detections: sv.Detections,
+    classes: list[str],
+    top_x_detections: Optional[int] = None,
     confidence_threshold: float = 0.0,
     given_labels: Optional[list[str]] = None
 ) -> tuple[sv.Detections, list[str]]:
@@ -345,7 +345,7 @@ class CustomBoxAnnotator(sv.BoxAnnotator):
 
     def mark_area_as_occupied(self, x1, y1, x2, y2):
         self.label_mask[y1:y2, x1:x2] = True
-        
+
     def save_debug_image(self, scene):
         if self.save_path is not None:
             save_file = self.save_path / f"step_{self.save_counter}.jpg"
@@ -360,7 +360,7 @@ class CustomBoxAnnotator(sv.BoxAnnotator):
         padding = self.text_padding * 2
         text_full_width = text_width + padding
         text_full_height = text_height + padding
-        
+
         # Initialize naive positions as a list, starting from 'top_left' and moving clockwise
         naive_positions = [
             {"name": "top_left", "x1": x1, "y1": y1 - text_full_height, "x2": x1 + text_full_width, "y2": y1},
@@ -368,12 +368,12 @@ class CustomBoxAnnotator(sv.BoxAnnotator):
             {"name": "bottom_right", "x1": x2 - text_full_width, "y1": y2, "x2": x2, "y2": y2 + text_full_height},
             {"name": "bottom_left", "x1": x1, "y1": y2, "x2": x1 + text_full_width, "y2": y2 + text_full_height},
         ]
-        
+
         # Check each image boundary and adjust if necessary
         positions_list = []
         for curr_label_pos in naive_positions:
             # Left iamge boundarry check
-            if curr_label_pos["x1"] < 0:  
+            if curr_label_pos["x1"] < 0:
                 curr_label_pos["x1"] = 0
                 curr_label_pos["x2"] = min(text_full_width, image_width)
             # Top image boundary check
@@ -391,7 +391,7 @@ class CustomBoxAnnotator(sv.BoxAnnotator):
                 curr_label_pos["y1"] = max(curr_label_pos["y1"] - overflow, 0)
                 curr_label_pos["y2"] = image_height
             positions_list.append(curr_label_pos)
-        
+
         # Check for collisions with existing labels
         curr_id = self.curr_detections.class_id[self.curr_label_idx]
         curr_label = self.labels[self.curr_label_idx]
@@ -407,7 +407,7 @@ class CustomBoxAnnotator(sv.BoxAnnotator):
 
         # If all positions have been checked and all have collisions, log that no viable position was found
         logging.debug(f"NO VIABLE POSITION for label {curr_num}/{curr_total} with class ID: {curr_id}, NAME: {curr_label}")
-        return (pos['x1'], pos['y1'], pos['x2'], pos['y2'], pos['name']) 
+        return (pos['x1'], pos['y1'], pos['x2'], pos['y2'], pos['name'])
 
     def annotate(
         self,
@@ -429,10 +429,10 @@ class CustomBoxAnnotator(sv.BoxAnnotator):
             self.save_debug_image(scene)
             logging.debug(f"Bounding box {i+1}/{len(detections)} drawn for class ID: {class_id}, NAME: {text}")
             logging.debug(f"with color {str(color)} at {(x1, y1, x2, y2)}")
-            
+
         if skip_label:
             return scene
-        
+
         logging.debug("Starting label drawing process.")
         for i, (x1, y1, x2, y2) in enumerate(detections.xyxy.astype(int)):
             self.curr_label_idx = i
@@ -447,7 +447,7 @@ class CustomBoxAnnotator(sv.BoxAnnotator):
 
             self.mark_area_as_occupied(label_x1, label_y1, label_x2, label_y2)
             cv2.rectangle(scene, (label_x1, label_y1), (label_x2, label_y2), color=color.as_bgr(), thickness=cv2.FILLED)
-            
+
             cv2.putText(scene, text, (int(label_x1) + self.text_padding, int(label_y2) - self.text_padding), font, self.text_scale, self.text_color.as_rgb(), self.text_thickness, cv2.LINE_AA)
 
             self.save_debug_image(scene)
@@ -457,12 +457,12 @@ class CustomBoxAnnotator(sv.BoxAnnotator):
 
         return scene
 
-    
+
 def vis_result_for_vlm(
-    image: np.ndarray, 
-    detections: sv.Detections, 
-    labels: list[str], 
-    color: Color | ColorPalette = ColorPalette.default(), 
+    image: np.ndarray,
+    detections: sv.Detections,
+    labels: list[str],
+    color: Color | ColorPalette = ColorPalette.DEFAULT,
     draw_bbox: bool = True,
     thickness: int = 2,
     text_scale: float = 0.3,
@@ -492,21 +492,21 @@ def vis_result_for_vlm(
         annotated_image = box_annotator.annotate(scene=annotated_image, detections=detections, labels=labels)
     return annotated_image, labels
 
-        
+
 def vis_result_fast(
-    image: np.ndarray, 
-    detections: sv.Detections, 
-    classes: list[str], 
-    color: Color | ColorPalette = ColorPalette.default(), 
+    image: np.ndarray,
+    detections: sv.Detections,
+    classes: list[str],
+    color: Color | ColorPalette = ColorPalette.DEFAULT,
     instance_random_color: bool = False,
     draw_bbox: bool = True,
 ) -> np.ndarray:
     '''
-    Annotate the image with the detection results. 
-    This is fast but of the same resolution of the input image, thus can be blurry. 
+    Annotate the image with the detection results.
+    This is fast but of the same resolution of the input image, thus can be blurry.
     '''
     # annotate image with detections
-    box_annotator = sv.BoxAnnotator(
+    box_annotator = sv.LabelAnnotator(
         color = color,
         text_scale=0.3,
         text_thickness=1,
@@ -529,15 +529,15 @@ def vis_result_fast(
     else:
         print("Detections object does not have 'confidence' or 'class_id' attributes or one of them is missing.")
 
-    
+
     if instance_random_color:
         # generate random colors for each segmentation
         # First create a shallow copy of the input detections
         detections = dataclasses.replace(detections)
         detections.class_id = np.arange(len(detections))
-        
+
     annotated_image = mask_annotator.annotate(scene=image.copy(), detections=detections)
-    
+
     if draw_bbox:
         annotated_image = box_annotator.annotate(scene=annotated_image, detections=detections, labels=labels)
     return annotated_image, labels
@@ -556,7 +556,7 @@ def vis_result_slow_caption(image, masks, boxes_filt, pred_phrases, caption, tex
 
     plt.title('Tagging-Caption: ' + caption + '\n' + 'Tagging-classes: ' + text_prompt + '\n')
     plt.axis('off')
-    
+
     # Convert the fig to a numpy array
     fig = plt.gcf()
     fig.tight_layout(pad=0)
@@ -564,7 +564,7 @@ def vis_result_slow_caption(image, masks, boxes_filt, pred_phrases, caption, tex
     vis_image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
     vis_image = vis_image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     plt.close()
-    
+
     return vis_image
 
 def vis_sam_mask(anns):
@@ -576,7 +576,7 @@ def vis_sam_mask(anns):
         m = ann['segmentation']
         color_mask = np.concatenate([np.random.random(3), [0.35]])
         img[m] = color_mask
-        
+
     return img
 
 def poses2lineset(poses, color=[0, 0, 1]):
@@ -622,15 +622,15 @@ def better_camera_frustum(camera_pose, img_h, img_w, scale=3.0, color=[0, 0, 1])
     # Convert camera pose tensor to numpy array
     if isinstance(camera_pose, torch.Tensor):
         camera_pose = camera_pose.numpy()
-    
+
     # Define near and far distance (adjust these as needed)
     near = scale * 0.1
     far = scale * 1.0
-    
+
     # Define frustum dimensions at the near plane (replace with appropriate values)
     frustum_h = near
     frustum_w = frustum_h * img_w / img_h  # Set frustum width based on its height and the image aspect ratio
-    
+
     # Compute the 8 points that define the frustum
     points = []
     for x in [-1, 1]:
@@ -645,10 +645,10 @@ def better_camera_frustum(camera_pose, img_h, img_w, scale=3.0, color=[0, 0, 1])
                 # transformed_point[0] *= -1  # Flip X-coordinate
                 points.append(transformed_point) # Using camera pose directly
                 # points.append((camera_pose_np @ point).ravel()[:3]) # Using camera pose directly
-    
+
     # Create lines that connect the 8 points
     lines = [[0, 1], [1, 3], [3, 2], [2, 0], [4, 5], [5, 7], [7, 6], [6, 4], [0, 4], [1, 5], [3, 7], [2, 6]]
-    
+
     frustum = o3d.geometry.LineSet()
     frustum.points = o3d.utility.Vector3dVector(points)
     frustum.lines = o3d.utility.Vector2iVector(lines)
@@ -683,24 +683,24 @@ def save_video_detections(exp_out_path, save_path=None, fps=30):
     '''
     if save_path is None:
         save_path = exp_out_path / "vis_video.mp4"
-    
+
     # Get the list of images
     image_files = list((exp_out_path / "vis").glob("*.jpg"))
     image_files.sort()
-    
+
     # Read the first image to get the size
     image = Image.open(image_files[0])
     width, height = image.size
-    
+
     # Create the video writer
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(str(save_path), fourcc, fps, (width, height))
-    
+
     # Write the images to the video
     for image_file in image_files:
         image = cv2.imread(str(image_file))
         out.write(image)
-    
+
     out.release()
     print(f"Video saved at {save_path}")
 
@@ -715,26 +715,26 @@ def save_video_from_frames(frames, save_path, fps=30):
     """
     # Ensure frames are in uint8
     frames = np.asarray(frames).astype(np.uint8)
-    
+
     # Check if frames array is empty
     if frames.size == 0:
         print("No frames to save.")
         return
-    
+
     # Get the size of the first frame
     height, width = frames[0].shape[:2]
-    
+
     # Create the video writer
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(str(save_path), fourcc, fps, (width, height))
-    
+
     # Write the frames to the video
     for frame in frames:
         # OpenCV expects BGR format, might need to convert from RGB to BGR
         if frame.shape[2] == 3:  # If frame has three channels
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         out.write(frame)
-    
+
     # Release the video writer
     out.release()
     print(f"Video saved at {save_path}")

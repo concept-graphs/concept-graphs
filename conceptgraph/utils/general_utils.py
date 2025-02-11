@@ -385,15 +385,37 @@ def filter_detections(
             filtered_detections.append(current_det)
 
     # Unzip the filtered results
+    # confidences, class_ids, xyxy, masks, indices = zip(*filtered_detections)
+    # filtered_labels = [given_labels[i] for i in indices]
+
+    # # Create new detections object
+    # filtered_detections = sv.Detections(
+    #     class_id=np.array(class_ids, dtype=np.int64),
+    #     confidence=np.array(confidences, dtype=np.float32),
+    #     xyxy=np.array(xyxy, dtype=np.float32),
+    #     mask=np.array(masks, dtype=np.bool_)
+    # )
+
+    # fix bugs: if no detections, then the zip will fail
+    # ValueError: not enough values to unpack (expected 5, got 0)
+    # use Replica dataset room2 image 198/200 as an example to reproduce the bug
+    if not filtered_detections:
+        filtered_detections = sv.Detections(
+            class_id = np.empty((0,), dtype=np.int64),
+            confidence = np.empty((0,), dtype=np.float32),
+            xyxy = np.empty((0, 4), dtype=np.float32),
+            mask = np.empty((0, image.shape[0], image.shape[1]), dtype=np.bool_)
+        )
+        return filtered_detections, []
+
+    # if exist detections, then unzip and construct the detections object
     confidences, class_ids, xyxy, masks, indices = zip(*filtered_detections)
     filtered_labels = [given_labels[i] for i in indices]
-
-    # Create new detections object
     filtered_detections = sv.Detections(
-        class_id=np.array(class_ids, dtype=np.int64),
-        confidence=np.array(confidences, dtype=np.float32),
-        xyxy=np.array(xyxy, dtype=np.float32),
-        mask=np.array(masks, dtype=np.bool_)
+        class_id = np.array(class_ids, dtype=np.int64),
+        confidence = np.array(confidences, dtype=np.float32),
+        xyxy = np.array(xyxy, dtype=np.float32),
+        mask = np.array(masks, dtype=np.bool_)
     )
 
     return filtered_detections, filtered_labels
